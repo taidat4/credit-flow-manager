@@ -345,7 +345,9 @@ async function syncAdmin(adminId) {
         }
     }
     if (!googlePassword) {
-        throw new Error('Admin chưa có Google password, không thể sync');
+        console.log(`[Sync] Admin ${adminId}: Bỏ qua - chưa có Google password`);
+        syncStatus[adminId] = { status: 'done', message: 'Bỏ qua - chưa có password', last_sync: null };
+        return null;
     }
 
     syncStatus[adminId] = { status: 'syncing', message: 'Đang khởi tạo browser...', last_sync: null };
