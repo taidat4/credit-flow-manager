@@ -41,9 +41,15 @@ try {
     }
   };
 
-  getSyncStatus = (adminId) => {
-    // Sync status is read directly from database — same DB for both Railway and VPS
-    return { status: 'checking' };
+  getSyncStatus = async (adminId) => {
+    try {
+      const res = await fetch(`${VPS_URL}/api/admins/${adminId}/sync-status`, {
+        headers: { 'X-VPS-Bridge': 'true', 'X-Sync-Key': SYNC_KEY }
+      });
+      return await res.json();
+    } catch (err) {
+      return { status: 'idle', message: 'VPS không khả dụng' };
+    }
   };
 }
 
@@ -224,8 +230,8 @@ router.post('/sync-all', requireAuthOrBridge, async (req, res) => {
 });
 
 // GET /api/admins/:id/sync-status
-router.get('/:id/sync-status', requireAuth, (req, res) => {
-  const status = getSyncStatus(parseInt(req.params.id));
+router.get('/:id/sync-status', requireAuthOrBridge, async (req, res) => {
+  const status = await getSyncStatus(parseInt(req.params.id));
   res.json(status);
 });
 
