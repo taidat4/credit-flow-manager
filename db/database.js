@@ -34,10 +34,9 @@ const db = {
         return result.rows;
       },
       async run(...params) {
-        // For INSERT, add RETURNING id to get lastInsertRowid
         let finalSql = pgSql;
         if (/^\s*INSERT/i.test(finalSql) && !/RETURNING/i.test(finalSql)) {
-          finalSql = finalSql.replace(/;?\s*$/, ' RETURNING id');
+          finalSql = finalSql.replace(/;?\s*$/, ' RETURNING *');
         }
         const result = await pool.query(finalSql, params);
         return {
@@ -75,7 +74,7 @@ const db = {
               async run(...params) {
                 let finalSql = pgSql;
                 if (/^\s*INSERT/i.test(finalSql) && !/RETURNING/i.test(finalSql)) {
-                  finalSql = finalSql.replace(/;?\s*$/, ' RETURNING id');
+                  finalSql = finalSql.replace(/;?\s*$/, ' RETURNING *');
                 }
                 const result = await client.query(finalSql, params);
                 return {
