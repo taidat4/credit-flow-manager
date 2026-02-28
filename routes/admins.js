@@ -10,9 +10,8 @@ let syncAdmin, syncAllAdmins, getSyncStatus;
 try {
   ({ syncAdmin, syncAllAdmins, getSyncStatus } = require('../services/scraper'));
 } catch {
-  const notAvailable = () => { throw new Error('Scraper không khả dụng trên hosting này'); };
-  syncAdmin = notAvailable;
-  syncAllAdmins = notAvailable;
+  syncAdmin = async () => ({ status: 'unavailable', message: 'Scraper không khả dụng trên hosting này' });
+  syncAllAdmins = async () => ({ status: 'unavailable', message: 'Scraper không khả dụng trên hosting này' });
   getSyncStatus = () => ({ status: 'unavailable', message: 'Scraper không khả dụng' });
 }
 
