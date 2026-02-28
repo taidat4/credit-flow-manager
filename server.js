@@ -34,7 +34,7 @@ app.use(session({
     }
 }));
 
-// Routes
+// API Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/admins', require('./routes/admins'));
 app.use('/api/members', require('./routes/members'));
@@ -44,11 +44,19 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/subscription', require('./routes/subscription'));
 app.use('/api/super-admin', require('./routes/superadmin'));
 
+// Global JSON error handler for API routes
+app.use('/api', (err, req, res, next) => {
+    console.error(`[API Error] ${req.method} ${req.url}:`, err.message);
+    console.error(err.stack);
+    res.status(500).json({ error: err.message || 'Internal server error' });
+});
+
 // Super Admin dashboard
 app.get('/super-admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'super-admin.html'));
 });
 
+// SPA catch-all (only for non-API routes)
 app.get('/{*splat}', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -67,8 +75,12 @@ db.init().then(() => {
         }
 
         // Start MB Bank service
-        const { startAutoCheck } = require('./services/mbbank');
-        startAutoCheck();
+        try {
+            const { startAutoCheck } = require('./services/mbbank');
+            startAutoCheck();
+        } catch (err) {
+            console.log('[MBBank] ⚠️ Start error:', err.message);
+        }
     });
 }).catch(err => {
     console.error('❌ Failed to initialize database:', err.message);
