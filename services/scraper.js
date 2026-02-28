@@ -334,10 +334,15 @@ async function syncAdmin(adminId) {
 
     // Decrypt password
     let googlePassword = '';
+    console.log(`[Sync] Admin ${adminId}: google_password field = ${admin.google_password ? `"${admin.google_password.substring(0, 20)}..." (${admin.google_password.length} chars)` : 'EMPTY/NULL'}`);
     if (admin.google_password) {
         try {
             googlePassword = decrypt(admin.google_password) || '';
-        } catch { googlePassword = ''; }
+            console.log(`[Sync] Admin ${adminId}: decrypted password = ${googlePassword ? 'OK (' + googlePassword.length + ' chars)' : 'EMPTY'}`);
+        } catch (e) {
+            console.error(`[Sync] Admin ${adminId}: decrypt FAILED:`, e.message);
+            googlePassword = '';
+        }
     }
     if (!googlePassword) {
         throw new Error('Admin chưa có Google password, không thể sync');
