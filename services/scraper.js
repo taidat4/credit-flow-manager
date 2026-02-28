@@ -106,12 +106,13 @@ async function safeClick(driver, element) {
  * Helper: safe fill input (clear + type, same as MY_BOT _safe_fill)
  */
 async function safeFill(driver, element, text) {
+    const str = text ? String(text) : '';
     await element.click();
     await driver.sleep(200);
     await element.clear();
     await driver.sleep(200);
     // Type character by character for human-like behavior
-    for (const char of text) {
+    for (const char of str) {
         await element.sendKeys(char);
         await driver.sleep(50 + Math.random() * 50);
     }
@@ -335,8 +336,11 @@ async function syncAdmin(adminId) {
     let googlePassword = '';
     if (admin.google_password) {
         try {
-            googlePassword = decrypt(admin.google_password);
+            googlePassword = decrypt(admin.google_password) || '';
         } catch { googlePassword = ''; }
+    }
+    if (!googlePassword) {
+        throw new Error('Admin chưa có Google password, không thể sync');
     }
 
     syncStatus[adminId] = { status: 'syncing', message: 'Đang khởi tạo browser...', last_sync: null };
