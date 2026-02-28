@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Credit-Flow Manager | Google One Family</title>
+  <meta name="description" content="Quản lý credit AI và bộ nhớ Google One Family">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body>
+
+  <!-- LOGIN PAGE -->
+  <div id="login-page" class="login-page">
+    <div class="login-bg">
+      <div class="login-bg-orb login-bg-orb--1"></div>
+      <div class="login-bg-orb login-bg-orb--2"></div>
+      <div class="login-bg-orb login-bg-orb--3"></div>
+    </div>
+    <div class="login-container">
+      <div class="login-card" id="login-card">
+        <div class="login-header">
+          <div class="login-logo"><i class="fas fa-bolt"></i></div>
+          <h1>Credit-Flow</h1>
+          <p>Google One Family Manager</p>
+        </div>
+        <form id="login-form" class="login-form active">
+          <div class="form-group">
+            <label for="login-username"><i class="fas fa-user"></i> Tên đăng nhập</label>
+            <input type="text" id="login-username" placeholder="Nhập username" required autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="login-password"><i class="fas fa-lock"></i> Mật khẩu</label>
+            <div class="password-input">
+              <input type="password" id="login-password" placeholder="Nhập mật khẩu" required
+                autocomplete="current-password">
+              <button type="button" class="toggle-password" onclick="togglePassword('login-password', this)"><i
+                  class="fas fa-eye"></i></button>
+            </div>
+          </div>
+          <div id="login-error" class="form-error"></div>
+          <button type="submit" class="btn btn-primary btn-full"><i class="fas fa-sign-in-alt"></i> Đăng nhập</button>
+          <div class="login-footer">
+            <p>Chưa có tài khoản? <a href="#" id="show-register">Đăng ký ngay</a></p>
+          </div>
+        </form>
+        <form id="register-form" class="login-form">
+          <div class="form-group">
+            <label for="reg-display-name"><i class="fas fa-id-card"></i> Họ tên</label>
+            <input type="text" id="reg-display-name" placeholder="Nhập họ tên" required>
+          </div>
+          <div class="form-group">
+            <label for="reg-username"><i class="fas fa-user"></i> Tên đăng nhập</label>
+            <input type="text" id="reg-username" placeholder="Chọn username" required autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="reg-password"><i class="fas fa-lock"></i> Mật khẩu</label>
+            <div class="password-input">
+              <input type="password" id="reg-password" placeholder="Tối thiểu 6 ký tự" required minlength="6"
+                autocomplete="new-password">
+              <button type="button" class="toggle-password" onclick="togglePassword('reg-password', this)"><i
+                  class="fas fa-eye"></i></button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="reg-confirm"><i class="fas fa-lock"></i> Xác nhận mật khẩu</label>
+            <div class="password-input">
+              <input type="password" id="reg-confirm" placeholder="Nhập lại mật khẩu" required minlength="6"
+                autocomplete="new-password">
+              <button type="button" class="toggle-password" onclick="togglePassword('reg-confirm', this)"><i
+                  class="fas fa-eye"></i></button>
+            </div>
+          </div>
+          <div id="register-error" class="form-error"></div>
+          <button type="submit" class="btn btn-primary btn-full"><i class="fas fa-user-plus"></i> Đăng ký</button>
+          <div class="login-footer">
+            <p>Đã có tài khoản? <a href="#" id="show-login">Đăng nhập</a></p>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="app" class="app hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo"><i class="fas fa-bolt"></i><span>Credit-Flow</span></div>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="#dashboard" class="nav-item active" data-page="dashboard"><i class="fas fa-th-large"></i><span>Tổng
+            quan</span></a>
+        <a href="#admins" class="nav-item" data-page="admins"><i class="fas fa-user-shield"></i><span>Quản lý Acc
+            Farm</span></a>
+
+        <a href="#plans" class="nav-item" data-page="plans"><i class="fas fa-crown"></i><span>Gói dịch vụ</span></a>
+        <a href="#deposit" class="nav-item" data-page="deposit"><i class="fas fa-wallet"></i><span>Nạp tiền</span></a>
+        <a href="#settings" class="nav-item" data-page="settings"><i class="fas fa-cog"></i><span>Cài đặt</span></a>
+      </nav>
+      <div class="sidebar-user" style="flex-direction:column;gap:6px;align-items:stretch">
+        <a href="#deposit" id="sidebar-balance-link"
+          style="padding:8px 12px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.15);border-radius:8px;display:flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;cursor:pointer"
+          onclick="App.navigate('deposit')">
+          <i class="fas fa-wallet" style="color:#22c55e;font-size:13px"></i>
+          <span style="font-size:14px;color:#22c55e;font-weight:700" id="sidebar-balance">0đ</span>
+        </a>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div class="user-info">
+            <div class="user-avatar" id="sidebar-avatar">A</div>
+            <div class="user-details">
+              <span class="user-name" id="sidebar-username">Admin</span>
+              <span class="user-role" id="sidebar-role">Administrator</span>
+            </div>
+          </div>
+          <button class="btn-logout" id="btn-logout" title="Đăng xuất"><i class="fas fa-sign-out-alt"></i></button>
+        </div>
+      </div>
+    </aside>
+    <main class="main-content">
+      <header class="top-bar">
+        <button class="mobile-menu-btn" id="mobile-menu-btn"><i class="fas fa-bars"></i></button>
+        <h2 id="page-title">Dashboard</h2>
+        <div class="top-bar-actions"><span class="current-time" id="current-time"></span></div>
+      </header>
+      <div class="content" id="content"></div>
+    </main>
+  </div>
+
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal" id="modal">
+      <div class="modal-header">
+        <h3 id="modal-title">Modal</h3>
+        <button class="modal-close" id="modal-close"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="/js/app.js"></script>
+  <script src="/js/dashboard.js"></script>
+  <script src="/js/admins.js"></script>
+  <script src="/js/plans.js"></script>
+  <script src="/js/deposit.js"></script>
+  <script src="/js/settings.js"></script>
+</body>
+
+</html>

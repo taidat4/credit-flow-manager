@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Super Admin - Credit-Flow Manager</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f1117;
+      --bg-card: #1a1d2e;
+      --bg-input: #252840;
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --accent: #6366f1;
+      --accent-light: #818cf8;
+      --success: #22c55e;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --info: #3b82f6;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* Login Screen */
+    .login-screen {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    .login-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 40px;
+      width: 400px;
+      max-width: 90vw;
+      text-align: center;
+    }
+
+    .login-box h1 {
+      font-size: 24px;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #f97316, #ef4444);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .login-box p {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-bottom: 24px;
+    }
+
+    .login-box input {
+      width: 100%;
+      padding: 12px 16px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: 14px;
+      margin-bottom: 16px;
+      outline: none;
+      font-family: monospace;
+      letter-spacing: 2px;
+      text-align: center;
+    }
+
+    .login-box input:focus {
+      border-color: var(--accent);
+    }
+
+    /* Layout */
+    .app {
+      display: none;
+    }
+
+    .app.active {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      width: 220px;
+      background: var(--bg-card);
+      border-right: 1px solid var(--border);
+      padding: 16px 0;
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0;
+      bottom: 0;
+    }
+
+    .sidebar-brand {
+      padding: 12px 20px;
+      font-weight: 800;
+      font-size: 15px;
+      color: #f97316;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 8px;
+    }
+
+    .sidebar-brand i {
+      margin-right: 6px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all .2s;
+      border-left: 3px solid transparent;
+    }
+
+    .nav-item:hover {
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text);
+    }
+
+    .nav-item.active {
+      color: var(--accent-light);
+      background: rgba(99, 102, 241, 0.08);
+      border-left-color: var(--accent);
+    }
+
+    .nav-item i {
+      width: 18px;
+      text-align: center;
+    }
+
+    .main {
+      margin-left: 220px;
+      flex: 1;
+      padding: 24px;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    /* Stats */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .stat-value {
+      font-size: 28px;
+      font-weight: 800;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all .2s;
+      font-family: inherit;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-light);
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: white;
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: white;
+    }
+
+    .btn-warning {
+      background: var(--warning);
+      color: white;
+    }
+
+    .btn-sm {
+      padding: 5px 10px;
+      font-size: 11px;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+    }
+
+    /* Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th {
+      text-align: left;
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      font-size: 13px;
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* Forms */
+    .form-group {
+      margin-bottom: 12px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      font-family: inherit;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      border-color: var(--accent);
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    /* Badge */
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .badge-active {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--success);
+    }
+
+    .badge-inactive {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--danger);
+    }
+
+    .badge-warning {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--warning);
+    }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      width: 500px;
+      max-width: 90vw;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+
+    .modal h3 {
+      font-size: 18px;
+      margin-bottom: 16px;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 16px;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      z-index: 9999;
+      animation: slideIn .3s;
+    }
+
+    @keyframes slideIn {
+      from {
+        transform: translateY(20px);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    .toast-success {
+      background: #22c55e;
+      color: white;
+    }
+
+    .toast-error {
+      background: #ef4444;
+      color: white;
+    }
+
+    .toast-info {
+      background: #3b82f6;
+      color: white;
+    }
+
+    .color-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .logout-btn {
+      margin-top: auto;
+      padding: 12px 20px;
+      color: var(--danger);
+      cursor: pointer;
+      font-size: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .logout-btn:hover {
+      background: rgba(239, 68, 68, 0.08);
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Login -->
+  <div class="login-screen" id="loginScreen">
+    <div class="login-box">
+      <div style="font-size:48px;margin-bottom:16px">🔐</div>
+      <h1>Super Admin</h1>
+      <p>Nhập API Key để truy cập bảng điều khiển quản trị</p>
+      <input type="password" id="apiKeyInput" placeholder="API Key..." autocomplete="off">
+      <button class="btn btn-primary" style="width:100%;padding:12px;font-size:14px" onclick="SA.login()">
+        <i class="fas fa-sign-in-alt"></i> Đăng nhập
+      </button>
+      <p id="loginError" style="color:var(--danger);font-size:12px;margin-top:12px;display:none"></p>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div class="app" id="app">
+    <div class="sidebar">
+      <div class="sidebar-brand"><i class="fas fa-crown"></i> Super Admin</div>
+      <div class="nav-item active" data-page="dashboard" onclick="SA.navigate('dashboard')"><i
+          class="fas fa-chart-line"></i> Tổng quan</div>
+      <div class="nav-item" data-page="plans" onclick="SA.navigate('plans')"><i class="fas fa-tags"></i> Gói dịch
+        vụ</div>
+      <div class="nav-item" data-page="users" onclick="SA.navigate('users')"><i class="fas fa-users"></i> Người
+        dùng</div>
+      <div class="nav-item" data-page="announcements" onclick="SA.navigate('announcements')"><i
+          class="fas fa-bullhorn"></i> Thông báo</div>
+      <div class="nav-item" data-page="config" onclick="SA.navigate('config')"><i class="fas fa-palette"></i> Cấu
+        hình</div>
+      <div class="nav-item" data-page="mbbank" onclick="SA.navigate('mbbank')"><i class="fas fa-university"></i> MB Bank
+      </div>
+      <div class="logout-btn" onclick="SA.logout()"><i class="fas fa-sign-out-alt"></i> Đăng xuất</div>
+    </div>
+    <div class="main" id="mainContent"></div>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modal">
+    <div class="modal" id="modalContent"></div>
+  </div>
+
+  <script>
+    const SA = {
+      apiKey: '',
+      currentPage: 'dashboard',
+
+      // API helper
+      async api(url, method = 'GET', body = null) {
+        const opts = { method, headers: { 'Content-Type': 'application/json', 'X-Api-Key': this.apiKey } };
+        if (body) opts.body = JSON.stringify(body);
+        const res = await fetch('/api/super-admin' + url, opts);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'API Error');
+        return data;
+      },
+
+      // Login
+      async login() {
+        const key = document.getElementById('apiKeyInput').value.trim();
+        if (!key) return;
+        this.apiKey = key;
+        try {
+          await this.api('/verify');
+          localStorage.setItem('sa_api_key', key);
+          document.getElementById('loginScreen').style.display = 'none';
+          document.getElementById('app').classList.add('active');
+          this.navigate('dashboard');
+        } catch {
+          document.getElementById('loginError').textContent = 'API Key không hợp lệ!';
+          document.getElementById('loginError').style.display = 'block';
+        }
+      },
+
+      logout() {
+        localStorage.removeItem('sa_api_key');
+        location.reload();
+      },
+
+      // Init
+      init() {
+        const key = localStorage.getItem('sa_api_key');
+        if (key) { this.apiKey = key; this.login(); }
+        document.getElementById('apiKeyInput').addEventListener('keydown', e => { if (e.key === 'Enter') this.login(); });
+      },
+
+      // Navigation
+      navigate(page) {
+        this.currentPage = page;
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === page));
+        this['load_' + page]();
+      },
+
+      toast(msg, type = 'info') {
+        const t = document.createElement('div');
+        t.className = 'toast toast-' + type;
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 3000);
+      },
+
+      openModal(html) {
+        document.getElementById('modalContent').innerHTML = html;
+        document.getElementById('modal').classList.add('active');
+      },
+      closeModal() { document.getElementById('modal').classList.remove('active'); },
+
+      formatVND(n) { return new Intl.NumberFormat('vi-VN').format(n) + 'đ'; },
+
+      // ============ DASHBOARD ============
+      async load_dashboard() {
+        try {
+          const data = await this.api('/revenue');
+          document.getElementById('mainContent').innerHTML = `
+        <h2 style="margin-bottom:20px"><i class="fas fa-chart-line" style="color:var(--accent)"></i> Tổng quan doanh thu</h2>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Tổng doanh thu</div>
+            <div class="stat-value" style="color:var(--success)">${this.formatVND(data.totalRevenue)}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Doanh thu tháng này</div>
+            <div class="stat-value" style="color:var(--info)">${this.formatVND(data.monthRevenue)}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Tổng người dùng</div>
+            <div class="stat-value" style="color:var(--accent-light)">${data.totalUsers}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Đăng ký đang hoạt động</div>
+            <div class="stat-value" style="color:var(--warning)">${data.activeSubs}</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="card">
+            <div class="card-header"><span class="card-title"><i class="fas fa-chart-bar" style="color:var(--info);margin-right:6px"></i>Doanh thu theo tháng</span></div>
+            <div id="monthlyChart">${data.monthly.length ? data.monthly.map(m => `
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                <span style="min-width:60px;font-size:12px;color:var(--text-muted)">${m.month}</span>
+                <div style="flex:1;background:var(--bg-input);border-radius:4px;height:24px;overflow:hidden">
+                  <div style="height:100%;background:linear-gradient(90deg,var(--info),var(--accent));width:${data.monthly.length ? Math.max(5, (m.revenue / Math.max(...data.monthly.map(x => x.revenue))) * 100) : 0}%;border-radius:4px;display:flex;align-items:center;padding:0 8px">
+                    <span style="font-size:10px;font-weight:700;color:white">${this.formatVND(m.revenue)}</span>
+                  </div>
+                </div>
+                <span style="font-size:11px;color:var(--text-muted)">${m.count} đơn</span>
+              </div>
+            `).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px">Chưa có dữ liệu</div>'}</div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><span class="card-title"><i class="fas fa-pie-chart" style="color:var(--warning);margin-right:6px"></i>Doanh thu theo gói</span></div>
+            ${data.byPlan.length ? data.byPlan.map(p => `
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                <div class="color-dot" style="background:${p.color}"></div>
+                <span style="flex:1;font-size:13px;font-weight:600">${p.name}</span>
+                <span style="font-size:12px;color:var(--text-muted)">${p.count} đơn</span>
+                <span style="font-size:13px;font-weight:700;color:var(--success)">${this.formatVND(p.revenue)}</span>
+              </div>
+            `).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px">Chưa có dữ liệu</div>'}
+          </div>
+        </div>
+      `;
+        } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      // ============ PLANS ============
+      async load_plans() {
+        try {
+          const { plans } = await this.api('/plans');
+          document.getElementById('mainContent').innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+          <h2><i class="fas fa-tags" style="color:var(--warning)"></i> Quản lý gói dịch vụ</h2>
+          <button class="btn btn-primary" onclick="SA.showPlanModal()"><i class="fas fa-plus"></i> Thêm gói</button>
+        </div>
+        <div class="card">
+          <table>
+            <thead><tr><th>Gói</th><th>Giá</th><th>Farm</th><th>Members</th><th>Sync</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+            <tbody>
+              ${plans.map(p => `<tr>
+                <td><span style="font-size:16px;margin-right:6px">${p.icon}</span><strong>${p.name}</strong></td>
+                <td style="font-weight:700;color:var(--success)">${p.price_label}/tháng</td>
+                <td>${p.max_farms >= 9999 ? 'Unlimited' : p.max_farms}</td>
+                <td>${p.max_members >= 9999 ? 'Unlimited' : p.max_members}</td>
+                <td>${p.sync_interval}</td>
+                <td>${p.is_active ? '<span class="badge badge-active">Active</span>' : '<span class="badge badge-inactive">Inactive</span>'}</td>
+                <td>
+                  <button class="btn btn-ghost btn-sm" onclick="SA.editPlan(${p.id})"><i class="fas fa-edit"></i></button>
+                  <button class="btn btn-danger btn-sm" onclick="SA.deletePlan(${p.id},'${p.name}')"><i class="fas fa-trash"></i></button>
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+        } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      showPlanModal(plan = null) {
+        const isEdit = !!plan;
+        this.openModal(`
+      <h3>${isEdit ? 'Sửa gói' : 'Thêm gói mới'}</h3>
+      <div class="form-row">
+        <div class="form-group"><label>Tên gói</label><input id="pm-name" value="${plan?.name || ''}"></div>
+        <div class="form-group"><label>Slug</label><input id="pm-slug" value="${plan?.slug || ''}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Giá (VNĐ)</label><input type="number" id="pm-price" value="${plan?.price || 0}"></div>
+        <div class="form-group"><label>Label giá</label><input id="pm-price-label" value="${plan?.price_label || ''}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Max Farms</label><input type="number" id="pm-farms" value="${plan?.max_farms || 10}"></div>
+        <div class="form-group"><label>Max Members</label><input type="number" id="pm-members" value="${plan?.max_members || 50}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Sync Interval</label><input id="pm-sync" value="${plan?.sync_interval || '30 phút'}"></div>
+        <div class="form-group"><label>Icon (emoji)</label><input id="pm-icon" value="${plan?.icon || '🌱'}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Màu</label><input type="color" id="pm-color" value="${plan?.color || '#22c55e'}"></div>
+        <div class="form-group"><label>Sort Order</label><input type="number" id="pm-sort" value="${plan?.sort_order || 0}"></div>
+      </div>
+      <div class="form-group"><label>Features (mỗi dòng 1 feature)</label><textarea id="pm-features">${(plan?.features || []).join('\n')}</textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label>Badge Text</label><input id="pm-badge" value="${plan?.badge_text || ''}"></div>
+        <div class="form-group">
+          <label>Active</label>
+          <select id="pm-active"><option value="1" ${!plan || plan.is_active ? 'selected' : ''}>Active</option><option value="0" ${plan && !plan.is_active ? 'selected' : ''}>Inactive</option></select>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="SA.closeModal()">Hủy</button>
+        <button class="btn btn-primary" onclick="SA.savePlan(${plan?.id || 'null'})">${isEdit ? 'Lưu' : 'Thêm'}</button>
+      </div>
+    `);
+      },
+
+      async editPlan(id) {
+        const { plans } = await this.api('/plans');
+        const plan = plans.find(p => p.id === id);
+        if (plan) this.showPlanModal(plan);
+      },
+
+      async savePlan(id) {
+        const data = {
+          name: document.getElementById('pm-name').value, slug: document.getElementById('pm-slug').value,
+          price: parseInt(document.getElementById('pm-price').value), price_label: document.getElementById('pm-price-label').value,
+          max_farms: parseInt(document.getElementById('pm-farms').value), max_members: parseInt(document.getElementById('pm-members').value),
+          sync_interval: document.getElementById('pm-sync').value, icon: document.getElementById('pm-icon').value,
+          color: document.getElementById('pm-color').value, sort_order: parseInt(document.getElementById('pm-sort').value),
+          features: document.getElementById('pm-features').value.split('\n').filter(f => f.trim()),
+          badge_text: document.getElementById('pm-badge').value, badge_color: '',
+          is_active: parseInt(document.getElementById('pm-active').value)
+        };
+        try {
+          if (id) await this.api('/plans/' + id, 'PUT', data);
+          else await this.api('/plans', 'POST', data);
+          this.closeModal(); this.toast(id ? 'Đã cập nhật gói!' : 'Đã thêm gói!', 'success'); this.load_plans();
+        } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      async deletePlan(id, name) {
+        if (!confirm(`Xóa gói "${name}"?`)) return;
+        try { await this.api('/plans/' + id, 'DELETE'); this.toast('Đã xóa!', 'success'); this.load_plans(); } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      // ============ USERS ============
+      async load_users() {
+        try {
+          const { users } = await this.api('/users');
+          const { plans } = await this.api('/plans');
+          document.getElementById('mainContent').innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+          <h2><i class="fas fa-users" style="color:var(--info)"></i> Quản lý người dùng</h2>
+          <span style="color:var(--text-muted);font-size:13px">${users.length} người dùng</span>
+        </div>
+        <div class="card">
+          <table>
+            <thead><tr><th>User</th><th>Role</th><th>Số dư</th><th>Gói hiện tại</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+            <tbody>
+              ${users.map(u => `<tr>
+                <td>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <div style="width:32px;height:32px;border-radius:8px;background:${u.avatar_color};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:white">${u.display_name.charAt(0)}</div>
+                    <div><div style="font-weight:600;font-size:13px">${u.display_name}</div><div style="font-size:11px;color:var(--text-muted)">@${u.username}</div></div>
+                  </div>
+                </td>
+                <td><span class="badge ${u.role === 'admin' ? 'badge-warning' : 'badge-active'}">${u.role}</span></td>
+                <td style="font-weight:700;color:var(--success)">${SA.formatVND(u.balance || 0)}</td>
+                <td style="font-weight:600;color:${u.current_plan ? 'var(--accent-light)' : 'var(--text-muted)'}">${u.current_plan || 'Chưa đăng ký'}</td>
+                <td>${u.is_active ? '<span class="badge badge-active">Active</span>' : '<span class="badge badge-inactive">Locked</span>'}</td>
+                <td>
+                  <button class="btn btn-ghost btn-sm" onclick="SA.showUserDetail(${u.id})" title="Chi tiết"><i class="fas fa-eye"></i></button>
+                  <button class="btn btn-success btn-sm" onclick="SA.adjustBalance(${u.id},'${u.display_name.replace(/'/g, "\\\\'")}',${u.balance || 0})" title="Cộng/trừ tiền"><i class="fas fa-coins"></i></button>
+                  <button class="btn btn-warning btn-sm" onclick="SA.addSubscription(${u.id},'${u.display_name}')"><i class="fas fa-plus"></i> Gói</button>
+                  ${u.is_active ? `<button class="btn btn-danger btn-sm" onclick="SA.toggleUser(${u.id},0)"><i class="fas fa-lock"></i></button>` : `<button class="btn btn-success btn-sm" onclick="SA.toggleUser(${u.id},1)"><i class="fas fa-unlock"></i></button>`}
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+          this._plans = plans;
+        } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      async showUserDetail(id) {
+        try {
+          const { user, subscriptions } = await this.api('/users/' + id);
+          this.openModal(`
+        <h3><i class="fas fa-user" style="color:var(--info);margin-right:8px"></i>${user.display_name}</h3>
+        <div style="margin-bottom:12px;font-size:13px;color:var(--text-muted)">@${user.username} · ${user.role} · Tạo: ${new Date(user.created_at).toLocaleDateString('vi-VN')}</div>
+        <h4 style="font-size:14px;margin-bottom:8px"><i class="fas fa-history" style="margin-right:6px"></i>Lịch sử đăng ký</h4>
+        ${subscriptions.length ? `<table>
+          <thead><tr><th>Gói</th><th>Trạng thái</th><th>Từ ngày</th><th>Đến ngày</th><th>Đã trả</th><th></th></tr></thead>
+          <tbody>${subscriptions.map(s => `<tr>
+            <td style="font-weight:600;color:${s.color}">${s.plan_name}</td>
+            <td><span class="badge ${s.status === 'active' ? 'badge-active' : s.status === 'expired' ? 'badge-inactive' : 'badge-warning'}">${s.status}</span></td>
+            <td style="font-size:12px">${s.start_date}</td>
+            <td style="font-size:12px">${s.end_date || 'N/A'}</td>
+            <td style="font-weight:700;color:var(--success)">${SA.formatVND(s.amount_paid)}</td>
+            <td>
+              ${s.status === 'active' ? `<button class="btn btn-danger btn-sm" onclick="SA.cancelSub(${s.id})">Hủy</button>` : ''}
+            </td>
+          </tr>`).join('')}</tbody>
+        </table>` : '<div style="text-align:center;color:var(--text-muted);padding:16px">Chưa có đăng ký nào</div>'}
+        <div class="modal-actions"><button class="btn btn-ghost" onclick="SA.closeModal()">Đóng</button></div>
+      `);
+        } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      async addSubscription(userId, userName) {
+        const plans = this._plans || (await this.api('/plans')).plans;
+        this.openModal(`
+      <h3>Thêm gói cho ${userName}</h3>
+      <div class="form-group"><label>Gói</label><select id="sub-plan">${plans.map(p => `<option value="${p.id}">${p.name} - ${p.price_label}/tháng</option>`).join('')}</select></div>
+      <div class="form-row">
+        <div class="form-group"><label>Ngày bắt đầu</label><input type="date" id="sub-start" value="${new Date().toISOString().split('T')[0]}"></div>
+        <div class="form-group"><label>Ngày kết thúc</label><input type="date" id="sub-end"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Số tiền đã trả (VNĐ)</label><input type="number" id="sub-amount" value="0"></div>
+        <div class="form-group"><label>Phương thức</label><input id="sub-method" placeholder="Bank, Momo..."></div>
+      </div>
+      <div class="form-group"><label>Ghi chú</label><textarea id="sub-notes"></textarea></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="SA.closeModal()">Hủy</button>
+        <button class="btn btn-primary" onclick="SA.saveSubscription(${userId})">Thêm</button>
+      </div>
+    `);
+      },
+
+      async saveSubscription(userId) {
+        try {
+          await this.api('/subscriptions', 'POST', {
+            user_id: userId, plan_id: parseInt(document.getElementById('sub-plan').value),
+            start_date: document.getElementById('sub-start').value, end_date: document.getElementById('sub-end').value || null,
+            amount_paid: parseInt(document.getElementById('sub-amount').value) || 0,
+            payment_method: document.getElementById('sub-method').value, notes: document.getElementById('sub-notes').value
+          });
+          this.closeModal(); this.toast('Đã thêm đăng ký!', 'success'); this.load_users();
+        } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      async cancelSub(id) {
+        if (!confirm('Hủy đăng ký này?')) return;
+        try { await this.api('/subscriptions/' + id, 'PUT', { status: 'cancelled', end_date: new Date().toISOString().split('T')[0], notes: 'Cancelled by admin' }); this.toast('Đã hủy!', 'success'); this.closeModal(); this.load_users(); } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      async adjustBalance(userId, userName, currentBalance) {
+        this.openModal(`
+      <h3><i class="fas fa-coins" style="color:var(--warning);margin-right:8px"></i>Cộng/trừ tiền - ${userName}</h3>
+      <div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:12px;margin-bottom:16px;text-align:center">
+        <div style="font-size:11px;color:var(--text-muted)">Số dư hiện tại</div>
+        <div style="font-size:24px;font-weight:800;color:var(--success)">${this.formatVND(currentBalance)}</div>
+      </div>
+      <div class="form-group"><label>Số tiền (VNĐ) — số dương = cộng, số âm = trừ</label><input type="number" id="bal-amount" placeholder="50000 hoặc -30000"></div>
+      <div class="form-group"><label>Lý do</label><input id="bal-reason" placeholder="Cộng tiền lỗi thanh toán..."></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="SA.closeModal()">Hủy</button>
+        <button class="btn btn-primary" onclick="SA.confirmAdjustBalance(${userId})"><i class="fas fa-check"></i> Xác nhận</button>
+      </div>
+    `);
+      },
+
+      async confirmAdjustBalance(userId) {
+        const amount = parseInt(document.getElementById('bal-amount').value);
+        const description = document.getElementById('bal-reason').value;
+        if (!amount || isNaN(amount)) { this.toast('Nhập số tiền hợp lệ', 'error'); return; }
+        try {
+          const result = await this.api('/users/' + userId + '/balance', 'PUT', { amount, description });
+          this.closeModal();
+          this.toast(result.message, 'success');
+          this.load_users();
+        } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      async toggleUser(id, active) {
+        const user = (await this.api('/users/' + id)).user;
+        try { await this.api('/users/' + id, 'PUT', { ...user, is_active: active }); this.toast(active ? 'Đã mở khóa!' : 'Đã khóa!', 'success'); this.load_users(); } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      // ============ ANNOUNCEMENTS ============
+      async load_announcements() {
+        try {
+          const { announcements } = await this.api('/announcements');
+          document.getElementById('mainContent').innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+          <h2><i class="fas fa-bullhorn" style="color:var(--danger)"></i> Quản lý thông báo & Popup</h2>
+          <button class="btn btn-primary" onclick="SA.showAnnouncementModal()"><i class="fas fa-plus"></i> Thêm</button>
+        </div>
+        <div class="card">
+          <table>
+            <thead><tr><th>Tiêu đề</th><th>Loại</th><th>Popup</th><th>Trạng thái</th><th>Ngày tạo</th><th>Thao tác</th></tr></thead>
+            <tbody>
+              ${announcements.length ? announcements.map(a => `<tr>
+                <td style="font-weight:600">${a.title}</td>
+                <td><span class="badge" style="background:rgba(${a.type === 'info' ? '59,130,246' : a.type === 'warning' ? '245,158,11' : a.type === 'success' ? '34,197,94' : '239,68,68'},0.15);color:${a.type === 'info' ? 'var(--info)' : a.type === 'warning' ? 'var(--warning)' : a.type === 'success' ? 'var(--success)' : 'var(--danger)'}">${a.type}</span></td>
+                <td>${a.is_popup ? '<i class="fas fa-check" style="color:var(--success)"></i>' : '<i class="fas fa-times" style="color:var(--text-muted)"></i>'}</td>
+                <td>${a.is_active ? '<span class="badge badge-active">Active</span>' : '<span class="badge badge-inactive">Inactive</span>'}</td>
+                <td style="font-size:12px;color:var(--text-muted)">${new Date(a.created_at).toLocaleDateString('vi-VN')}</td>
+                <td>
+                  <button class="btn btn-ghost btn-sm" onclick="SA.editAnnouncement(${a.id})"><i class="fas fa-edit"></i></button>
+                  <button class="btn btn-danger btn-sm" onclick="SA.deleteAnnouncement(${a.id})"><i class="fas fa-trash"></i></button>
+                </td>
+              </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">Chưa có thông báo nào</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+        } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      showAnnouncementModal(item = null) {
+        const isEdit = !!item;
+        this.openModal(`
+      <h3>${isEdit ? 'Sửa thông báo' : 'Thêm thông báo mới'}</h3>
+      <div class="form-group"><label>Tiêu đề</label><input id="an-title" value="${item?.title || ''}"></div>
+      <div class="form-group"><label>Nội dung</label><textarea id="an-content">${item?.content || ''}</textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label>Loại</label><select id="an-type"><option value="info" ${item?.type === 'info' ? 'selected' : ''}>Info</option><option value="warning" ${item?.type === 'warning' ? 'selected' : ''}>Warning</option><option value="success" ${item?.type === 'success' ? 'selected' : ''}>Success</option><option value="danger" ${item?.type === 'danger' ? 'selected' : ''}>Danger</option></select></div>
+        <div class="form-group"><label>Hiện popup</label><select id="an-popup"><option value="1" ${item?.is_popup ? 'selected' : ''}>Có</option><option value="0" ${!item?.is_popup ? 'selected' : ''}>Không</option></select></div>
+      </div>
+      <div class="form-group"><label>Active</label><select id="an-active"><option value="1" ${!item || item.is_active ? 'selected' : ''}>Active</option><option value="0" ${item && !item.is_active ? 'selected' : ''}>Inactive</option></select></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="SA.closeModal()">Hủy</button>
+        <button class="btn btn-primary" onclick="SA.saveAnnouncement(${item?.id || 'null'})">${isEdit ? 'Lưu' : 'Thêm'}</button>
+      </div>
+    `);
+      },
+
+      async editAnnouncement(id) {
+        const { announcements } = await this.api('/announcements');
+        const item = announcements.find(a => a.id === id);
+        if (item) this.showAnnouncementModal(item);
+      },
+
+      async saveAnnouncement(id) {
+        const data = {
+          title: document.getElementById('an-title').value, content: document.getElementById('an-content').value,
+          type: document.getElementById('an-type').value, is_popup: parseInt(document.getElementById('an-popup').value),
+          is_active: parseInt(document.getElementById('an-active').value)
+        };
+        try {
+          if (id) await this.api('/announcements/' + id, 'PUT', data);
+          else await this.api('/announcements', 'POST', data);
+          this.closeModal(); this.toast(id ? 'Đã cập nhật!' : 'Đã thêm!', 'success'); this.load_announcements();
+        } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      async deleteAnnouncement(id) {
+        if (!confirm('Xóa thông báo này?')) return;
+        try { await this.api('/announcements/' + id, 'DELETE'); this.toast('Đã xóa!', 'success'); this.load_announcements(); } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      // ============ CONFIG ============
+      async load_config() {
+        try {
+          const { config } = await this.api('/config');
+          document.getElementById('mainContent').innerHTML = `
+        <h2 style="margin-bottom:20px"><i class="fas fa-palette" style="color:var(--accent-light)"></i> Cấu hình hệ thống</h2>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title"><i class="fas fa-paint-brush" style="color:var(--accent);margin-right:6px"></i>Theme & Giao diện</span></div>
+          <div class="form-row">
+            <div class="form-group"><label>Theme</label><select id="cfg-theme"><option value="dark" ${config.theme === 'dark' ? 'selected' : ''}>Dark</option><option value="light" ${config.theme === 'light' ? 'selected' : ''}>Light</option></select></div>
+            <div class="form-group"><label>Màu chính</label><input type="color" id="cfg-color" value="${config.primary_color || '#6366f1'}"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Tên website</label><input id="cfg-sitename" value="${config.site_name || ''}"></div>
+            <div class="form-group"><label>Text chào mừng</label><input id="cfg-welcome" value="${config.welcome_text || ''}"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title"><i class="fas fa-cog" style="color:var(--warning);margin-right:6px"></i>Cấu hình khác</span></div>
+          <div id="customConfigs">
+            ${Object.entries(config).filter(([k]) => !['theme', 'primary_color', 'site_name', 'welcome_text'].includes(k)).map(([k, v]) => `
+              <div class="form-row" style="margin-bottom:8px">
+                <div class="form-group" style="margin-bottom:0"><input value="${k}" disabled style="opacity:0.6"></div>
+                <div class="form-group" style="margin-bottom:0;display:flex;gap:4px"><input value="${v}" class="cfg-custom-val" data-key="${k}"><button class="btn btn-danger btn-sm" onclick="this.parentElement.parentElement.remove()" style="flex-shrink:0"><i class="fas fa-times"></i></button></div>
+              </div>
+            `).join('')}
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="SA.addConfigRow()" style="margin-top:8px"><i class="fas fa-plus"></i> Thêm config</button>
+        </div>
+
+        <button class="btn btn-primary" onclick="SA.saveConfig()" style="margin-top:8px"><i class="fas fa-save"></i> Lưu cấu hình</button>
+      `;
+        } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      addConfigRow() {
+        const div = document.createElement('div');
+        div.className = 'form-row';
+        div.style.marginBottom = '8px';
+        div.innerHTML = `<div class="form-group" style="margin-bottom:0"><input placeholder="Key" class="cfg-new-key"></div><div class="form-group" style="margin-bottom:0;display:flex;gap:4px"><input placeholder="Value" class="cfg-new-val"><button class="btn btn-danger btn-sm" onclick="this.parentElement.parentElement.remove()" style="flex-shrink:0"><i class="fas fa-times"></i></button></div>`;
+        document.getElementById('customConfigs').appendChild(div);
+      },
+
+      async saveConfig() {
+        const data = {
+          theme: document.getElementById('cfg-theme').value,
+          primary_color: document.getElementById('cfg-color').value,
+          site_name: document.getElementById('cfg-sitename').value,
+          welcome_text: document.getElementById('cfg-welcome').value
+        };
+        // Existing custom configs
+        document.querySelectorAll('.cfg-custom-val').forEach(el => { data[el.dataset.key] = el.value; });
+        // New configs
+        document.querySelectorAll('.cfg-new-key').forEach((el, i) => {
+          const key = el.value.trim();
+          const val = document.querySelectorAll('.cfg-new-val')[i]?.value || '';
+          if (key) data[key] = val;
+        });
+        try { await this.api('/config', 'PUT', data); this.toast('Đã lưu cấu hình!', 'success'); } catch (err) { this.toast(err.message, 'error'); }
+      },
+
+      // ============ MB BANK CONFIG ============
+      async load_mbbank() {
+        try {
+          const cfg = await this.api('/mbbank-config');
+          document.getElementById('mainContent').innerHTML = `
+            <h2 style="margin-bottom:20px"><i class="fas fa-university" style="color:var(--info);margin-right:8px"></i>Cấu hình MB Bank (apicanhan.com)</h2>
+            <div class="card">
+              <div class="card-header"><span class="card-title"><i class="fas fa-key" style="color:var(--warning);margin-right:6px"></i>Thông tin API (bắt buộc)</span></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block">API Key (apicanhan)</label>
+                  <input id="mb-api-key" value="${cfg.mb_api_key || ''}" placeholder="API Key..." style="width:100%;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block">Số tài khoản</label>
+                  <input id="mb-account-no" value="${cfg.mb_account_no || ''}" placeholder="STK..." style="width:100%;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block">Username (SĐT MB Bank)</label>
+                  <input id="mb-user" value="${cfg.mb_user || ''}" placeholder="0965xxx..." style="width:100%;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block">Password (mật khẩu MB)</label>
+                  <input id="mb-password" type="password" value="${cfg.mb_password || ''}" placeholder="Mật khẩu..." style="width:100%;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+                </div>
+              </div>
+            </div>
+
+            <div class="card" style="margin-top:16px">
+              <div class="card-header"><span class="card-title"><i class="fab fa-telegram" style="color:var(--info);margin-right:6px"></i>Telegram Bot (thông báo nạp tiền)</span></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block">Bot Token</label>
+                  <input id="mb-bot-token" value="${cfg.mb_bot_token || ''}" placeholder="Bot token..." style="width:100%;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block">Chat ID</label>
+                  <input id="mb-chat-id" value="${cfg.mb_chat_id || ''}" placeholder="Chat ID..." style="width:100%;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+                </div>
+              </div>
+            </div>
+
+            <div class="card" style="margin-top:16px">
+              <div class="card-header"><span class="card-title"><i class="fas fa-shield-alt" style="color:var(--success);margin-right:6px"></i>MB Bank Session (nâng cao)</span></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block">Session ID</label>
+                  <input id="mb-session-id" value="${cfg.mb_session_id || ''}" placeholder="Session ID..." style="width:100%;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block">Token</label>
+                  <input id="mb-token" value="${cfg.mb_token || ''}" placeholder="Token auth..." style="width:100%;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block">Device ID</label>
+                  <input id="mb-device-id" value="${cfg.mb_device_id || ''}" placeholder="Device ID..." style="width:100%;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block">ID Run</label>
+                  <input id="mb-id-run" value="${cfg.mb_id_run || ''}" placeholder="ID Run..." style="width:100%;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+                </div>
+              </div>
+              <div style="margin-top:12px">
+                <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block">Cookie</label>
+                <textarea id="mb-cookie" rows="3" style="width:100%;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:11px;resize:vertical;font-family:monospace">${cfg.mb_cookie || ''}</textarea>
+              </div>
+            </div>
+
+            <div style="margin-top:16px;display:flex;gap:8px">
+              <button class="btn btn-primary" onclick="SA.saveMBConfig()"><i class="fas fa-save"></i> Lưu cấu hình</button>
+              <button class="btn btn-success" id="btn-test-mb" onclick="SA.testMBConnection()"><i class="fas fa-plug"></i> Test kết nối</button>
+            </div>
+          `;
+        } catch (err) {
+          document.getElementById('mainContent').innerHTML = `<p style="color:var(--danger)">Lỗi: ${err.message}</p>`;
+        }
+      },
+
+      async saveMBConfig() {
+        const data = {
+          mb_api_key: document.getElementById('mb-api-key').value,
+          mb_account_no: document.getElementById('mb-account-no').value,
+          mb_bot_token: document.getElementById('mb-bot-token').value,
+          mb_chat_id: document.getElementById('mb-chat-id').value,
+          mb_session_id: document.getElementById('mb-session-id').value,
+          mb_token: document.getElementById('mb-token').value,
+          mb_cookie: document.getElementById('mb-cookie').value,
+          mb_device_id: document.getElementById('mb-device-id').value,
+          mb_user: document.getElementById('mb-user').value,
+          mb_password: document.getElementById('mb-password').value,
+          mb_id_run: document.getElementById('mb-id-run').value
+        };
+        try {
+          await this.api('/mbbank-config', 'PUT', data);
+          this.toast('Đã lưu cấu hình MB Bank!', 'success');
+        } catch (err) {
+          this.toast(err.message, 'error');
+        }
+      },
+
+      async testMBConnection() {
+        const btn = document.getElementById('btn-test-mb');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang test...';
+        try {
+          // Save config first, then test via server-side proxy (avoids CORS)
+          await this.saveMBConfig();
+          const result = await this.api('/test-mbbank', 'POST');
+          if (result.ok) {
+            this.toast(result.message, 'success');
+          } else {
+            this.toast(result.message, 'error');
+          }
+        } catch (err) {
+          this.toast('Lỗi: ' + err.message, 'error');
+        }
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-plug"></i> Test kết nối';
+      }
+    };
+
+    // Click outside modal to close
+    document.getElementById('modal').addEventListener('click', e => { if (e.target === e.currentTarget) SA.closeModal(); });
+
+    SA.init();
+  </script>
+</body>
+
+</html>
