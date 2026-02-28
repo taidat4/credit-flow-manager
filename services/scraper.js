@@ -329,7 +329,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
 // ========= MAIN SYNC FUNCTION =========
 
 async function syncAdmin(adminId) {
-    const admin = db.prepare('SELECT * FROM admins WHERE id = ?').get(adminId);
+    const admin = await db.prepare('SELECT * FROM admins WHERE id = ?').get(adminId);
     if (!admin) throw new Error('Admin not found');
 
     // Decrypt password
@@ -394,7 +394,7 @@ async function syncAdmin(adminId) {
         await saveData(adminId, creditData, storageData);
 
         const now = new Date().toISOString();
-        db.prepare('UPDATE admins SET last_sync = ?, sync_status = ? WHERE id = ?').run(now, 'success', adminId);
+        await db.prepare('UPDATE admins SET last_sync = ?, sync_status = ? WHERE id = ?').run(now, 'success', adminId);
 
         syncStatus[adminId] = {
             status: 'done',
@@ -407,7 +407,7 @@ async function syncAdmin(adminId) {
 
     } catch (err) {
         console.error(`[Scraper] Error syncing admin ${adminId}:`, err.message);
-        db.prepare('UPDATE admins SET sync_status = ? WHERE id = ?').run('error: ' + err.message, adminId);
+        await db.prepare('UPDATE admins SET sync_status = ? WHERE id = ?').run('error: ' + err.message, adminId);
         syncStatus[adminId] = { status: 'error', message: err.message, last_sync: null };
         throw err;
 
@@ -604,22 +604,22 @@ async function scrapeFamily(driver, adminId, adminEmail) {
         const scrapedNames = familyMembers.map(m => m.name);
 
         // Remove garbage members not in scraped list
-        const existing = db.prepare('SELECT id, name FROM members WHERE admin_id = ? AND status = ?').all(adminId, 'active');
+        const existing = await db.prepare('SELECT id, name FROM members WHERE admin_id = ? AND status = ?').all(adminId, 'active');
         for (const em of existing) {
             if (!scrapedNames.includes(em.name)) {
-                db.prepare('UPDATE members SET status = ? WHERE id = ?').run('removed', em.id);
+                await db.prepare('UPDATE members SET status = ? WHERE id = ?').run('removed', em.id);
                 console.log(`[Scraper] ✗ Removed garbage: "${em.name}"`);
             }
         }
 
         for (const fm of familyMembers) {
-            const ex = db.prepare('SELECT id FROM members WHERE admin_id = ? AND name = ?').get(adminId, fm.name);
+            const ex = await db.prepare('SELECT id FROM members WHERE admin_id = ? AND name = ?').get(adminId, fm.name);
             if (!ex) {
                 const color = COLORS[Math.floor(Math.random() * COLORS.length)];
-                db.prepare('INSERT INTO members (admin_id, name, email, avatar_color, status) VALUES (?, ?, ?, ?, ?)').run(adminId, fm.name, fm.email, color, 'active');
+                await db.prepare('INSERT INTO members (admin_id, name, email, avatar_color, status) VALUES (?, ?, ?, ?, ?)').run(adminId, fm.name, fm.email, color, 'active');
                 console.log(`[Scraper] ✓ Created: ${fm.name} (${fm.email})`);
             } else {
-                db.prepare("UPDATE members SET email = CASE WHEN ? != '' THEN ? ELSE email END, status = ? WHERE id = ?").run(fm.email, fm.email, 'active', ex.id);
+                await db.prepare("UPDATE members SET email = CASE WHEN ? != '' THEN ? ELSE email END, status = ? WHERE id = ?").run(fm.email, fm.email, 'active', ex.id);
             }
         }
     }
@@ -723,7 +723,7 @@ function parseStorageToGB(value, unit) {
 }
 
 async function saveData(adminId, creditData, storageData) {
-    const admin = db.prepare('SELECT * FROM admins WHERE id = ?').get(adminId);
+    const admin = await db.prepare('SELECT * FROM admins WHERE id = ?').get(adminId);
     if (!admin) return;
     const today = new Date().toISOString().split('T')[0];
     const now = new Date().toISOString();
@@ -731,17 +731,17 @@ async function saveData(adminId, creditData, storageData) {
     // ===== CREDITS: Store absolute value from Google =====
     // creditData.monthlyCredits = credits remaining from Google One page
     // Store this directly on the admin record
-    db.prepare('UPDATE admins SET credits_remaining_actual = ?, last_sync = ? WHERE id = ?')
+    await db.prepare('UPDATE admins SET credits_remaining_actual = ?, last_sync = ? WHERE id = ?')
         .run(creditData.monthlyCredits, now, adminId);
 
     // For member usage: only log if value changed
     if (creditData.memberUsage.length > 0) {
         for (const usage of creditData.memberUsage) {
-            const member = db.prepare('SELECT id FROM members WHERE admin_id = ? AND name LIKE ?').get(adminId, `%${usage.name}%`);
+            const member = await db.prepare('SELECT id FROM members WHERE admin_id = ? AND name LIKE ?').get(adminId, `%${usage.name}%`);
             if (!member) continue;
 
             // Check last recorded value for this member
-            const lastLog = db.prepare(
+            const lastLog = await db.prepare(
                 "SELECT amount FROM credit_logs WHERE member_id = ? AND admin_id = ? AND description LIKE '%[auto-sync]%' ORDER BY id DESC LIMIT 1"
             ).get(member.id, adminId);
 
@@ -749,7 +749,7 @@ async function saveData(adminId, creditData, storageData) {
 
             // Only log if value changed
             if (usage.amount !== lastAmount) {
-                db.prepare('INSERT INTO credit_logs (admin_id, member_id, amount, description, log_date) VALUES (?, ?, ?, ?, ?)')
+                await db.prepare('INSERT INTO credit_logs (admin_id, member_id, amount, description, log_date) VALUES (?, ?, ?, ?, ?)')
                     .run(adminId, member.id, usage.amount, `[auto-sync] ${usage.name}`, today);
                 console.log(`[Scraper] Credit changed for ${usage.name}: ${lastAmount} -> ${usage.amount}`);
             }
@@ -758,13 +758,13 @@ async function saveData(adminId, creditData, storageData) {
         // Fallback: total usage from admin level
         const creditsUsed = admin.total_monthly_credits - creditData.monthlyCredits;
         if (creditsUsed > 0) {
-            const lastLog = db.prepare(
+            const lastLog = await db.prepare(
                 "SELECT amount FROM credit_logs WHERE admin_id = ? AND member_id IS NULL AND description LIKE '%[auto-sync] Total%' ORDER BY id DESC LIMIT 1"
             ).get(adminId);
             const lastAmount = lastLog ? lastLog.amount : 0;
 
             if (creditsUsed !== lastAmount) {
-                db.prepare('INSERT INTO credit_logs (admin_id, member_id, amount, description, log_date) VALUES (?, NULL, ?, ?, ?)')
+                await db.prepare('INSERT INTO credit_logs (admin_id, member_id, amount, description, log_date) VALUES (?, NULL, ?, ?, ?)')
                     .run(adminId, creditsUsed, '[auto-sync] Total usage', today);
             }
         }
@@ -773,10 +773,10 @@ async function saveData(adminId, creditData, storageData) {
     // ===== STORAGE =====
     if (storageData.familyStorage.length > 0) {
         for (const s of storageData.familyStorage) {
-            const member = db.prepare('SELECT id FROM members WHERE admin_id = ? AND name LIKE ?').get(adminId, `%${s.name}%`);
+            const member = await db.prepare('SELECT id FROM members WHERE admin_id = ? AND name LIKE ?').get(adminId, `%${s.name}%`);
             if (member) {
-                db.prepare("DELETE FROM storage_logs WHERE member_id = ? AND admin_id = ? AND log_date = ?").run(member.id, adminId, today);
-                db.prepare('INSERT INTO storage_logs (member_id, admin_id, drive_gb, gmail_gb, photos_gb, log_date) VALUES (?, ?, ?, ?, ?, ?)')
+                await db.prepare("DELETE FROM storage_logs WHERE member_id = ? AND admin_id = ? AND log_date = ?").run(member.id, adminId, today);
+                await db.prepare('INSERT INTO storage_logs (member_id, admin_id, drive_gb, gmail_gb, photos_gb, log_date) VALUES (?, ?, ?, ?, ?, ?)')
                     .run(member.id, adminId, storageData.driveGB, storageData.gmailGB, storageData.photosGB, today);
             }
         }
@@ -784,7 +784,7 @@ async function saveData(adminId, creditData, storageData) {
 }
 
 async function syncAllAdmins() {
-    const admins = db.prepare("SELECT id FROM admins WHERE status = 'active' AND google_password IS NOT NULL AND google_password != ''").all();
+    const admins = await db.prepare("SELECT id FROM admins WHERE status = 'active' AND google_password IS NOT NULL AND google_password != ''").all();
     const results = [];
     for (const admin of admins) {
         try {
