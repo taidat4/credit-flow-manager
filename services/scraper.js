@@ -783,16 +783,30 @@ async function saveData(adminId, creditData, storageData) {
     }
 }
 
+const MAX_CONCURRENT_SYNC = 5; // Run up to 5 browsers at once
+
 async function syncAllAdmins() {
     const admins = await db.prepare("SELECT id FROM admins WHERE status = 'active' AND google_password IS NOT NULL AND google_password != ''").all();
+    console.log(`[Sync] Starting sync for ${admins.length} admins (max ${MAX_CONCURRENT_SYNC} concurrent)`);
+
     const results = [];
-    for (const admin of admins) {
-        try {
-            const result = await syncAdmin(admin.id);
-            results.push({ id: admin.id, success: true, data: result });
-        } catch (err) {
-            results.push({ id: admin.id, success: false, error: err.message });
+    // Process in batches of MAX_CONCURRENT_SYNC
+    for (let i = 0; i < admins.length; i += MAX_CONCURRENT_SYNC) {
+        const batch = admins.slice(i, i + MAX_CONCURRENT_SYNC);
+        const batchResults = await Promise.allSettled(
+            batch.map(async (admin) => {
+                try {
+                    const result = await syncAdmin(admin.id);
+                    return { id: admin.id, success: true, data: result };
+                } catch (err) {
+                    return { id: admin.id, success: false, error: err.message };
+                }
+            })
+        );
+        for (const r of batchResults) {
+            results.push(r.status === 'fulfilled' ? r.value : { id: null, success: false, error: r.reason?.message });
         }
+        console.log(`[Sync] Batch ${Math.floor(i / MAX_CONCURRENT_SYNC) + 1} done (${Math.min(i + MAX_CONCURRENT_SYNC, admins.length)}/${admins.length})`);
     }
     return results;
 }
