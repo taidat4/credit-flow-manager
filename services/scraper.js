@@ -37,7 +37,7 @@ async function createBrowser(adminId) {
 
     const options = new chrome.Options();
     options.addArguments(`--user-data-dir=${profileDir}`);
-    // options.addArguments('--headless=new'); // DISABLED -- show browser for debugging
+    options.addArguments('--headless=new');
     options.addArguments('--no-first-run');
     options.addArguments('--no-default-browser-check');
     options.addArguments('--disable-infobars');
