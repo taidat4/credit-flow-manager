@@ -318,11 +318,14 @@ async function seedData() {
 // Initialize on import
 async function init() {
   try {
+    const dbUrl = process.env.DATABASE_URL || '';
+    console.log(`[DB] Connecting to: ${dbUrl ? dbUrl.replace(/:[^:@]+@/, ':***@') : 'NO DATABASE_URL SET!'}`);
     await initDatabase();
     await seedData();
     console.log('[DB] ✅ PostgreSQL ready');
   } catch (err) {
     console.error('[DB] ❌ Init failed:', err.message);
+    console.error('[DB] Stack:', err.stack);
     process.exit(1);
   }
 }
