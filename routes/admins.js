@@ -6,13 +6,45 @@ const OTPAuth = require('otpauth');
 const { encrypt, decrypt } = require('../services/crypto');
 
 // Scraper is optional (requires Playwright)
+// If not available, forward sync requests to VPS via API bridge
 let syncAdmin, syncAllAdmins, getSyncStatus;
+let useVpsBridge = false;
 try {
   ({ syncAdmin, syncAllAdmins, getSyncStatus } = require('../services/scraper'));
 } catch {
-  syncAdmin = async () => ({ status: 'unavailable', message: 'Scraper không khả dụng trên hosting này' });
-  syncAllAdmins = async () => ({ status: 'unavailable', message: 'Scraper không khả dụng trên hosting này' });
-  getSyncStatus = () => ({ status: 'unavailable', message: 'Scraper không khả dụng' });
+  useVpsBridge = true;
+  const SYNC_KEY = process.env.SYNC_API_KEY || 'sync-bridge-2026';
+  const VPS_URL = process.env.VPS_SYNC_URL || 'http://147.124.205.237:3000';
+
+  syncAdmin = async (adminId) => {
+    try {
+      const res = await fetch(`${VPS_URL}/api/admins/${adminId}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-VPS-Bridge': 'true', 'X-Sync-Key': SYNC_KEY }
+      });
+      return await res.json();
+    } catch (err) {
+      console.error('[Bridge] VPS sync failed:', err.message);
+      return { status: 'error', message: 'Không kết nối được VPS sync server' };
+    }
+  };
+
+  syncAllAdmins = async () => {
+    try {
+      const res = await fetch(`${VPS_URL}/api/admins/sync-all`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-VPS-Bridge': 'true', 'X-Sync-Key': SYNC_KEY }
+      });
+      return await res.json();
+    } catch (err) {
+      return { status: 'error', message: 'Không kết nối được VPS sync server' };
+    }
+  };
+
+  getSyncStatus = (adminId) => {
+    // Sync status is read directly from database — same DB for both Railway and VPS
+    return { status: 'checking' };
+  };
 }
 
 // GET /api/admins
@@ -164,8 +196,19 @@ router.get('/:id/totp', requireAuth, async (req, res) => {
   } catch (err) { res.status(400).json({ error: 'Invalid TOTP secret: ' + err.message }); }
 });
 
+// Bridge auth middleware — allows VPS to accept requests from Railway without session
+const SYNC_KEY = process.env.SYNC_API_KEY || 'sync-bridge-2026';
+function requireAuthOrBridge(req, res, next) {
+  // Accept bridge requests with API key
+  if (req.headers['x-vps-bridge'] === 'true' && req.headers['x-sync-key'] === SYNC_KEY) {
+    return next();
+  }
+  // Otherwise require normal session auth
+  return requireAuth(req, res, next);
+}
+
 // POST /api/admins/:id/sync
-router.post('/:id/sync', requireAuth, async (req, res) => {
+router.post('/:id/sync', requireAuthOrBridge, async (req, res) => {
   try {
     res.json({ status: 'started', message: 'Đang sync...' });
     syncAdmin(parseInt(req.params.id)).catch(err => console.error(`[Sync] Error for admin ${req.params.id}:`, err.message));
@@ -173,7 +216,7 @@ router.post('/:id/sync', requireAuth, async (req, res) => {
 });
 
 // POST /api/admins/sync-all
-router.post('/sync-all', requireAuth, async (req, res) => {
+router.post('/sync-all', requireAuthOrBridge, async (req, res) => {
   try {
     res.json({ status: 'started', message: 'Đang sync tất cả admins...' });
     syncAllAdmins().catch(err => console.error('[Sync] Error syncing all:', err.message));
