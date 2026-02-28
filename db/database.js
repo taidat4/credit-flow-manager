@@ -201,8 +201,10 @@ async function initDatabase() {
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             plan_id INTEGER REFERENCES sa_plans(id),
             status TEXT DEFAULT 'pending',
-            started_at TIMESTAMP,
-            expires_at TIMESTAMP,
+            start_date DATE,
+            end_date DATE,
+            amount_paid INTEGER DEFAULT 0,
+            duration_days INTEGER DEFAULT 30,
             payment_method TEXT DEFAULT '',
             notes TEXT DEFAULT '',
             created_at TIMESTAMP DEFAULT NOW()
@@ -238,6 +240,22 @@ async function initDatabase() {
     `);
 
   console.log('[DB] PostgreSQL schema initialized');
+
+  // Migrations for existing tables
+  const migrations = [
+    'ALTER TABLE sa_subscriptions ADD COLUMN IF NOT EXISTS start_date DATE',
+    'ALTER TABLE sa_subscriptions ADD COLUMN IF NOT EXISTS end_date DATE',
+    'ALTER TABLE sa_subscriptions ADD COLUMN IF NOT EXISTS amount_paid INTEGER DEFAULT 0',
+    'ALTER TABLE sa_subscriptions ADD COLUMN IF NOT EXISTS duration_days INTEGER DEFAULT 30',
+    // Copy data from old columns if they exist
+    "UPDATE sa_subscriptions SET start_date = started_at::date WHERE start_date IS NULL AND started_at IS NOT NULL",
+    "UPDATE sa_subscriptions SET end_date = expires_at::date WHERE end_date IS NULL AND expires_at IS NOT NULL",
+  ];
+
+  for (const sql of migrations) {
+    try { await pool.query(sql); } catch { }
+  }
+  console.log('[DB] Migrations applied');
 }
 
 // Seed data
