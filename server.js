@@ -1,9 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
-const SqliteStore = require('better-sqlite3-session-store')(session);
-const Database = require('better-sqlite3');
+const pgSession = require('connect-pg-simple')(session);
 const path = require('path');
+const db = require('./db/database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,12 +13,16 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Trust proxy for Railway/Render (needed for secure cookies behind reverse proxy)
+// Trust proxy for Railway/Render
 if (isProd) app.set('trust proxy', 1);
 
-const sessionDb = new Database(path.join(__dirname, 'db', 'sessions.db'));
+// Session store using PostgreSQL
 app.use(session({
-    store: new SqliteStore({ client: sessionDb, expired: { clear: true, intervalMs: 900000 } }),
+    store: new pgSession({
+        pool: db.pool,
+        tableName: 'session',
+        createTableIfMissing: true
+    }),
     secret: process.env.SESSION_SECRET || 'credit-flow-default-secret',
     resave: false,
     saveUninitialized: false,
@@ -30,8 +34,7 @@ app.use(session({
     }
 }));
 
-require('./db/database');
-
+// Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/admins', require('./routes/admins'));
 app.use('/api/members', require('./routes/members'));
@@ -41,7 +44,7 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/subscription', require('./routes/subscription'));
 app.use('/api/super-admin', require('./routes/superadmin'));
 
-// Super Admin dashboard - separate entry point
+// Super Admin dashboard
 app.get('/super-admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'super-admin.html'));
 });
@@ -50,19 +53,24 @@ app.get('/{*splat}', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
-    console.log(`🚀 Credit-Flow Manager running on http://localhost:${PORT}`);
+// Initialize DB then start server
+db.init().then(() => {
+    app.listen(PORT, () => {
+        console.log(`🚀 Credit-Flow Manager running on http://localhost:${PORT}`);
 
-    // Start auto sync (requires Playwright - skip on Railway/cloud)
-    try {
-        const { startAutoSync } = require('./services/scraper');
-        startAutoSync();
-    } catch (err) {
-        console.log('[Scraper] ⚠️ Không khả dụng (thiếu browser) - bỏ qua auto sync');
-    }
+        // Start auto sync (optional - requires Playwright)
+        try {
+            const { startAutoSync } = require('./services/scraper');
+            startAutoSync();
+        } catch (err) {
+            console.log('[Scraper] ⚠️ Không khả dụng - bỏ qua auto sync');
+        }
 
-    // Start MB Bank service
-    const { startAutoCheck } = require('./services/mbbank');
-    startAutoCheck();
+        // Start MB Bank service
+        const { startAutoCheck } = require('./services/mbbank');
+        startAutoCheck();
+    });
+}).catch(err => {
+    console.error('❌ Failed to initialize database:', err.message);
+    process.exit(1);
 });
-
