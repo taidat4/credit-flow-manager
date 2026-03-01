@@ -27,9 +27,11 @@ function getSyncStatus(adminId) {
 }
 
 /**
- * Create Chrome browser (same as MY_BOT BrowserManager)
+ * Create Chrome browser — smart headless:
+ * - Profile đã login (có session) → headless (nhẹ, nhanh)
+ * - Profile mới/chưa login → hiện browser để login
  */
-async function createBrowser(adminId, email) {
+async function createBrowser(adminId, email, forceVisible = false) {
     // Use email for profile dir to avoid ID collisions between databases
     const safeEmail = (email || `admin_${adminId}`).replace(/[^a-zA-Z0-9]/g, '_');
     const profileDir = path.join(BROWSER_DATA_DIR, `profile_${safeEmail}`);
@@ -37,9 +39,23 @@ async function createBrowser(adminId, email) {
         fs.mkdirSync(profileDir, { recursive: true });
     }
 
+    // Check if profile has existing login session
+    const hasSession = fs.existsSync(path.join(profileDir, 'Default', 'Cookies'))
+        || fs.existsSync(path.join(profileDir, 'Default', 'Login Data'))
+        || fs.existsSync(path.join(profileDir, 'Default', 'Network', 'Cookies'));
+
+    const useHeadless = hasSession && !forceVisible;
+
     const options = new chrome.Options();
     options.addArguments(`--user-data-dir=${profileDir}`);
-    // options.addArguments('--headless=new'); // TẠM TẮT - debug VPS
+
+    if (useHeadless) {
+        options.addArguments('--headless=new');
+        console.log(`[Scraper] 🔒 Headless mode (profile đã login)`);
+    } else {
+        console.log(`[Scraper] 👁 Visible mode (cần login hoặc force visible)`);
+    }
+
     options.addArguments('--no-first-run');
     options.addArguments('--no-default-browser-check');
     options.addArguments('--disable-infobars');
