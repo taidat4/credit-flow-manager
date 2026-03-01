@@ -292,8 +292,8 @@ router.post('/:id/cancel-invitation', requireAuthOrBridge, async (req, res) => {
   if (!email) return res.status(400).json({ error: 'Email là bắt buộc' });
   try {
     const result = await cancelInvitation(parseInt(req.params.id), email);
-    // Also update local DB so UI reflects immediately
-    if (result && (result.success || result.status !== 'error')) {
+    // Only update local DB if VPS confirmed Google cancellation
+    if (result && result.success === true) {
       await db.prepare("UPDATE members SET status = 'removed' WHERE admin_id = ? AND email = ? AND status = 'pending'").run(parseInt(req.params.id), email);
     }
     res.json(result);
