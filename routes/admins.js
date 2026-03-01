@@ -7,10 +7,10 @@ const { encrypt, decrypt } = require('../services/crypto');
 
 // Scraper is optional (requires Playwright)
 // If not available, forward sync requests to VPS via API bridge
-let syncAdmin, syncAllAdmins, getSyncStatus;
+let syncAdmin, syncAllAdmins, getSyncStatus, addFamilyMember, cancelInvitation, removeFamilyMember;
 let useVpsBridge = false;
 try {
-  ({ syncAdmin, syncAllAdmins, getSyncStatus } = require('../services/scraper'));
+  ({ syncAdmin, syncAllAdmins, getSyncStatus, addFamilyMember, cancelInvitation, removeFamilyMember } = require('../services/scraper'));
 } catch {
   useVpsBridge = true;
   const SYNC_KEY = process.env.SYNC_API_KEY || 'sync-bridge-2026';
@@ -49,6 +49,19 @@ try {
       return await res.json();
     } catch (err) {
       return { status: 'idle', message: 'VPS không khả dụng' };
+    }
+  };
+
+  addFamilyMember = async (adminId, email) => {
+    try {
+      const res = await fetch(`${VPS_URL}/api/admins/${adminId}/add-member`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-VPS-Bridge': 'true', 'X-Sync-Key': SYNC_KEY },
+        body: JSON.stringify({ email })
+      });
+      return await res.json();
+    } catch (err) {
+      return { status: 'error', message: 'Không kết nối được VPS' };
     }
   };
 }
@@ -106,7 +119,7 @@ router.get('/:id', requireAuth, async (req, res) => {
         SELECT m.*,
             COALESCE((SELECT cl.amount FROM credit_logs cl WHERE cl.member_id = m.id ORDER BY cl.id DESC LIMIT 1), 0) as total_credits_used,
             COALESCE((SELECT sl.total_gb FROM storage_logs sl WHERE sl.member_id = m.id ORDER BY sl.log_date DESC, sl.id DESC LIMIT 1), 0) as current_storage_gb
-        FROM members m WHERE m.admin_id = ? AND m.status = 'active' ORDER BY m.joined_at ASC
+        FROM members m WHERE m.admin_id = ? AND m.status IN ('active', 'pending') ORDER BY m.status ASC, m.joined_at ASC
     `).all(req.params.id);
 
   const { google_password, ...safeAdmin } = admin;
@@ -233,6 +246,42 @@ router.post('/sync-all', requireAuthOrBridge, async (req, res) => {
 router.get('/:id/sync-status', requireAuthOrBridge, async (req, res) => {
   const status = await getSyncStatus(parseInt(req.params.id));
   res.json(status);
+});
+
+// POST /api/admins/:id/add-member
+router.post('/:id/add-member', requireAuthOrBridge, async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email là bắt buộc' });
+  try {
+    const result = await addFamilyMember(parseInt(req.params.id), email);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/admins/:id/cancel-invitation
+router.post('/:id/cancel-invitation', requireAuthOrBridge, async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email là bắt buộc' });
+  try {
+    const result = await cancelInvitation(parseInt(req.params.id), email);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/admins/:id/remove-member
+router.post('/:id/remove-member', requireAuthOrBridge, async (req, res) => {
+  const { memberId } = req.body;
+  if (!memberId) return res.status(400).json({ error: 'memberId là bắt buộc' });
+  try {
+    const result = await removeFamilyMember(parseInt(req.params.id), parseInt(memberId));
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

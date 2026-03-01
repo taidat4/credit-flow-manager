@@ -246,7 +246,9 @@ const AdminsPage = {
       const data = await App.api(`/api/admins/${id}`);
       const a = data.admin;
       const members = data.members;
-      const slotsLeft = a.max_members - members.length;
+      const activeMembers = members.filter(m => m.status === 'active');
+      const pendingMembers = members.filter(m => m.status === 'pending');
+      const slotsLeft = a.max_members - activeMembers.length - pendingMembers.length;
 
       // Cache admin data for toggle/copy operations
       this._detailCache[id] = a;
@@ -316,6 +318,20 @@ const AdminsPage = {
         const bgColor = isOverLimit ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.12)';
         const borderColor = isOverLimit ? 'rgba(239,68,68,0.3)' : 'rgba(245,158,11,0.25)';
 
+
+        if (m.status === 'pending') {
+          return `
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:8px;margin-bottom:5px;opacity:0.85">
+            <div class="activity-avatar" style="background:#f59e0b;min-width:30px;width:30px;height:30px;font-size:14px">&#9203;</div>
+            <div style="flex:1;min-width:0;overflow:hidden">
+              <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.name} <span style="background:rgba(245,158,11,0.2);color:#f59e0b;font-size:9px;padding:1px 6px;border-radius:4px;margin-left:4px">&#9203; Ch\u1edd ch\u1ea5p nh\u1eadn</span></div>
+              <div style="font-size:10px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.email || ''}</div>
+            </div>
+            <button class="btn btn-sm" style="padding:4px 10px;font-size:10px;background:rgba(239,68,68,0.15);color:var(--danger);border:1px solid rgba(239,68,68,0.3);cursor:pointer;border-radius:6px;white-space:nowrap" onclick="event.stopPropagation();AdminsPage.cancelInvitation(${a.id}, '${(m.email || '').replace(/'/g, "\\\\\\'")}')">
+              <i class="fas fa-times-circle"></i> H\u1ee7y l\u1eddi m\u1eddi
+            </button>
+          </div>`;
+        }
         return `
         <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.03);border:1px solid ${isOverLimit ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.06)'};border-radius:8px;margin-bottom:5px">
           <div class="activity-avatar" style="background:${m.avatar_color};min-width:30px;width:30px;height:30px;font-size:12px">${m.name.charAt(0)}</div>
@@ -336,6 +352,9 @@ const AdminsPage = {
             </div>
             <button class="btn btn-sm" style="padding:3px 6px;font-size:9px;background:rgba(245,158,11,0.15);color:var(--warning);border:1px solid rgba(245,158,11,0.3);cursor:pointer;border-radius:6px;white-space:nowrap" onclick="event.stopPropagation();AdminsPage.setMemberCredit(${m.id}, '${m.name.replace(/'/g, "\\\\'")}', ${m.credit_limit || 0})" title="Set credit t\u1ed1i \u0111a cho th\u00e0nh vi\u00ean">
               <i class="fas fa-bolt"></i> Set
+            </button>
+            <button class="btn btn-sm" style="padding:3px 6px;font-size:9px;background:rgba(239,68,68,0.15);color:var(--danger);border:1px solid rgba(239,68,68,0.3);cursor:pointer;border-radius:6px" onclick="event.stopPropagation();AdminsPage.removeMember(${m.id}, '${m.name.replace(/'/g, "\\\\'")}', ${a.id})" title="Xóa thành viên">
+              <i class="fas fa-trash"></i>
             </button>
           </div>
         </div>
@@ -370,10 +389,9 @@ const AdminsPage = {
         ${creditSummaryHtml}
 
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-          <h4 style="font-size:12px;color:var(--text-secondary);margin:0"><i class="fas fa-users" style="margin-right:4px"></i> Thành viên (${members.length}/${a.max_members}) · <span style="color:${slotsLeft > 0 ? 'var(--success)' : 'var(--danger)'}">${slotsLeft} slot trống</span></h4>
+          <h4 style="font-size:12px;color:var(--text-secondary);margin:0"><i class="fas fa-users" style="margin-right:4px"></i> Thành viên (${activeMembers.length}/${a.max_members})${pendingMembers.length > 0 ? ' · <span style="color:#f59e0b">' + pendingMembers.length + ' chờ</span>' : ''} · <span style="color:${slotsLeft > 0 ? 'var(--success)' : 'var(--danger)'}">${slotsLeft} slot trống</span></h4>
           <div style="display:flex;gap:4px">
-            <button class="btn btn-danger btn-sm" style="font-size:10px;padding:3px 8px" onclick="App.toast('Chức năng sẽ sớm có!', 'info')"><i class="fas fa-user-minus"></i> Xóa TV</button>
-            <button class="btn btn-success btn-sm" style="font-size:10px;padding:3px 8px" onclick="App.toast('Chức năng sẽ sớm có!', 'info')"><i class="fas fa-user-plus"></i> Thêm TV</button>
+            <button class="btn btn-success btn-sm" style="font-size:10px;padding:3px 8px" onclick="AdminsPage.showAddMemberModal(${a.id}, ${a.max_members}, ${members.length})"><i class="fas fa-user-plus"></i> Thêm TV</button>
           </div>
         </div>
         <div class="activity-list" style="max-height:350px;overflow-y:auto;margin-bottom:12px">${membersHtml}</div>
@@ -626,5 +644,103 @@ const AdminsPage = {
         if (adminId) this.showDetail(adminId);
       } catch (err) { App.toast(err.message, 'error'); }
     });
+  },
+
+  // ========= ADD MEMBER ==========
+  showAddMemberModal(adminId, maxMembers, currentCount) {
+    if (currentCount >= maxMembers) {
+      App.toast(`Đã đạt tối đa ${maxMembers} thành viên!`, 'error');
+      return;
+    }
+    App.openModal('Thêm thành viên vào Google Family', `
+      <div style="margin-bottom:12px">
+        <label class="form-label">Email thành viên <span style="color:var(--danger)">*</span></label>
+        <input type="email" id="add-member-email" class="form-control" placeholder="email@gmail.com" />
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">
+        <i class="fas fa-info-circle"></i> Slot còn lại: <strong style="color:var(--success)">${maxMembers - currentCount}</strong> / ${maxMembers}<br/>
+        <i class="fas fa-robot"></i> Hệ thống sẽ tự động mở browser và gửi lời mời Google Family
+      </div>
+      <div id="add-member-status" style="display:none;margin-bottom:12px;padding:10px;border-radius:8px;font-size:12px"></div>
+      <div class="modal-actions" id="add-member-actions">
+        <button class="btn btn-success" onclick="AdminsPage.addMember(${adminId})"><i class="fas fa-user-plus"></i> Gửi lời mời</button>
+        <button class="btn btn-secondary" onclick="App.closeModal()">Hủy</button>
+      </div>
+    `);
+    setTimeout(() => document.getElementById('add-member-email')?.focus(), 100);
+  },
+
+  async addMember(adminId) {
+    const email = document.getElementById('add-member-email')?.value?.trim();
+    if (!email) { App.toast('Vui lòng nhập email', 'error'); return; }
+
+    // Show progress
+    const statusEl = document.getElementById('add-member-status');
+    const actionsEl = document.getElementById('add-member-actions');
+    statusEl.style.display = 'block';
+    statusEl.style.background = 'rgba(99,102,241,0.1)';
+    statusEl.style.border = '1px solid rgba(99,102,241,0.3)';
+    statusEl.style.color = 'var(--info)';
+    statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang gửi lời mời...';
+    actionsEl.style.display = 'none';
+
+    // Start polling sync status
+    const poll = setInterval(async () => {
+      try {
+        const s = await App.api(`/api/admins/${adminId}/sync-status`);
+        if (s && s.message) statusEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${s.message}`;
+      } catch { }
+    }, 2000);
+
+    try {
+      const result = await App.api(`/api/admins/${adminId}/add-member`, 'POST', { email });
+      clearInterval(poll);
+      statusEl.style.background = 'rgba(16,185,129,0.1)';
+      statusEl.style.border = '1px solid rgba(16,185,129,0.3)';
+      statusEl.style.color = 'var(--success)';
+      statusEl.innerHTML = `<i class="fas fa-check"></i> ${result.message || 'Đã gửi lời mời thành công!'}`;
+      App.toast(`✅ Đã mời ${email} vào Family`, 'success');
+      // Refresh after 2s
+      setTimeout(async () => {
+        App.closeModal();
+        await this.loadAdmins(true);
+        this.showDetail(adminId);
+      }, 2000);
+    } catch (err) {
+      clearInterval(poll);
+      statusEl.style.background = 'rgba(239,68,68,0.1)';
+      statusEl.style.border = '1px solid rgba(239,68,68,0.3)';
+      statusEl.style.color = 'var(--danger)';
+      statusEl.innerHTML = `<i class="fas fa-times"></i> Lỗi: ${err.message}`;
+      actionsEl.style.display = 'flex';
+    }
+  },
+
+  // ========= REMOVE MEMBER ==========
+  async removeMember(memberId, memberName, adminId) {
+    if (!await App.confirm(`Xóa thành viên "${memberName}" khỏi nhóm gia đình Google?`)) return;
+    try {
+      App.toast('Đang xóa thành viên...', 'info');
+      const result = await App.api(`/api/admins/${adminId}/remove-member`, 'POST', { memberId });
+      if (result.needsManual) {
+        App.toast(result.message, 'warning');
+      } else {
+        App.toast(result.message || `Đã xóa "${memberName}"`, 'success');
+      }
+      await this.loadAdmins(true);
+      this.showDetail(adminId);
+    } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  // ========= CANCEL INVITATION ==========
+  async cancelInvitation(adminId, memberEmail) {
+    if (!await App.confirm(`Hủy lời mời cho "${memberEmail}"?`)) return;
+    try {
+      App.toast('Đang hủy lời mời...', 'info');
+      const result = await App.api(`/api/admins/${adminId}/cancel-invitation`, 'POST', { email: memberEmail });
+      App.toast(result.message || 'Đã hủy lời mời', 'success');
+      await this.loadAdmins(true);
+      this.showDetail(adminId);
+    } catch (err) { App.toast(err.message, 'error'); }
   }
 };

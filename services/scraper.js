@@ -29,8 +29,10 @@ function getSyncStatus(adminId) {
 /**
  * Create Chrome browser (same as MY_BOT BrowserManager)
  */
-async function createBrowser(adminId) {
-    const profileDir = path.join(BROWSER_DATA_DIR, `admin_${adminId}_chrome`);
+async function createBrowser(adminId, email) {
+    // Use email for profile dir to avoid ID collisions between databases
+    const safeEmail = (email || `admin_${adminId}`).replace(/[^a-zA-Z0-9]/g, '_');
+    const profileDir = path.join(BROWSER_DATA_DIR, `profile_${safeEmail}`);
     if (!fs.existsSync(profileDir)) {
         fs.mkdirSync(profileDir, { recursive: true });
     }
@@ -135,8 +137,29 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
     // If we're on the credit page and NOT on login page or /about/ page = logged in
     const needsLogin = currentUrl.includes('accounts.google.com') || currentUrl.includes('/about/') || currentUrl.includes('/about');
     if (!needsLogin && currentUrl.includes('one.google.com')) {
-        console.log('[Login] ✓ Already logged in from previous session!');
-        return true;
+        // Verify we're logged into the CORRECT account
+        console.log('[Login] Session exists, verifying account...');
+        syncStatus[adminId].message = 'Đang kiểm tra tài khoản...';
+        try {
+            await driver.get('https://myaccount.google.com/personal-info');
+            await driver.sleep(3000);
+            const pageText = await driver.findElement(By.css('body')).getText();
+            if (pageText.toLowerCase().includes(email.toLowerCase())) {
+                console.log(`[Login] ✓ Correct account: ${email}`);
+                return true;
+            } else {
+                console.log(`[Login] ✗ Wrong account! Expected ${email}, signing out...`);
+                syncStatus[adminId].message = 'Sai tài khoản, đang đăng xuất...';
+                await driver.get('https://accounts.google.com/Logout');
+                await driver.sleep(3000);
+                // Navigate back to login
+                await driver.get('https://accounts.google.com/signin/v2/identifier?continue=' + encodeURIComponent(CREDIT_URL) + '&flowName=GlifWebSignIn&flowEntry=ServiceLogin');
+                await driver.sleep(3000);
+                currentUrl = await driver.getCurrentUrl();
+            }
+        } catch (e) {
+            console.log('[Login] Account verify failed:', e.message, '— proceeding to login');
+        }
     }
 
     // If redirected to /about/ (public page), go to login
@@ -354,7 +377,7 @@ async function syncAdmin(adminId) {
     let driver = null;
 
     try {
-        driver = await createBrowser(adminId);
+        driver = await createBrowser(adminId, admin.email);
 
         // Auto login!
         await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
@@ -538,9 +561,38 @@ async function scrapeFamily(driver, adminId, adminEmail) {
         const MEMBER_EXACT = ['member', 'thành viên'];
         const MANAGER_EXACT = ['family manager', 'người quản lý gia đình'];
 
+        // Also detect pending invitations
+        const PENDING_KEYWORDS = ['lời mời sẽ hết hạn', 'invitation expires', 'lời mời đã được gửi', 'invitation sent', 'hết hạn vào'];
+
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const nextLine = (lines[i + 1] || '').toLowerCase().trim();
+            const prevLine = (lines[i - 1] || '').toLowerCase().trim();
+
+            // Check for pending invitation: look for email on this line + invitation text on same/next line
+            // OR invitation text on this line + email on previous line
+            const emailInLine = line.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+            const lineLower = line.toLowerCase();
+            const hasPendingText = PENDING_KEYWORDS.some(kw => lineLower.includes(kw));
+            const nextHasPendingText = PENDING_KEYWORDS.some(kw => nextLine.includes(kw));
+
+            if (emailInLine && (hasPendingText || nextHasPendingText)) {
+                const pendingEmail = emailInLine[1];
+                if (pendingEmail !== adminEmail) {
+                    familyMembers.push({ name: pendingEmail, email: pendingEmail, role: 'pending' });
+                    console.log(`[Scraper] ⏳ Pending invitation: ${pendingEmail}`);
+                    if (nextHasPendingText) i++; // skip the expiry line
+                    continue;
+                }
+            }
+            // Also check: invitation text on current line, email on previous line
+            if (hasPendingText && !emailInLine) {
+                const prevEmailMatch = (lines[i - 1] || '').match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                if (prevEmailMatch && prevEmailMatch[1] !== adminEmail) {
+                    // Already handled by the check above when we were on the previous line
+                    continue;
+                }
+            }
 
             // Exact match ONLY - "member" !== "membership"
             const isMember = MEMBER_EXACT.some(role => nextLine === role);
@@ -548,8 +600,7 @@ async function scrapeFamily(driver, adminId, adminEmail) {
 
             if (!isMember && !isManager) continue;
 
-            // Validate name
-            const lineLower = line.toLowerCase();
+            // lineLower already defined above
             const isBlacklisted = BLACKLIST.some(bl => lineLower.includes(bl));
             if (isBlacklisted || line.length < 2 || line.length > 50 || line.includes('http') || line.includes('@')) {
                 console.log(`[Scraper] Skip invalid: "${line}"`);
@@ -564,9 +615,9 @@ async function scrapeFamily(driver, adminId, adminEmail) {
             }
         }
 
-        console.log(`[Scraper] Valid members: ${memberNames.length}`);
+        console.log(`[Scraper] Valid members: ${memberNames.length}, pending: ${familyMembers.filter(m => m.role === 'pending').length}`);
 
-        // Click each member to get email
+        // Click each ACTIVE member to get email (skip pending - we already have their email)
         for (const name of memberNames) {
             try {
                 await driver.get(FAMILY_URL);
@@ -598,31 +649,35 @@ async function scrapeFamily(driver, adminId, adminEmail) {
         console.error('[Scraper] Family error:', err.message);
     }
 
-    // Save to DB + cleanup garbage
-    if (familyMembers.length > 0) {
-        const COLORS = ['#f97316', '#06b6d4', '#8b5cf6', '#ef4444', '#22c55e', '#eab308', '#ec4899', '#14b8a6'];
-        const scrapedNames = familyMembers.map(m => m.name);
+    // Save to DB — ALWAYS sync real state (even if 0 members)
+    const COLORS = ['#f97316', '#06b6d4', '#8b5cf6', '#ef4444', '#22c55e', '#eab308', '#ec4899', '#14b8a6'];
+    const scrapedIdentifiers = familyMembers.map(m => m.name);
 
-        // Remove garbage members not in scraped list
-        const existing = await db.prepare('SELECT id, name FROM members WHERE admin_id = ? AND status = ?').all(adminId, 'active');
-        for (const em of existing) {
-            if (!scrapedNames.includes(em.name)) {
-                await db.prepare('UPDATE members SET status = ? WHERE id = ?').run('removed', em.id);
-                console.log(`[Scraper] ✗ Removed garbage: "${em.name}"`);
-            }
-        }
-
-        for (const fm of familyMembers) {
-            const ex = await db.prepare('SELECT id FROM members WHERE admin_id = ? AND name = ?').get(adminId, fm.name);
-            if (!ex) {
-                const color = COLORS[Math.floor(Math.random() * COLORS.length)];
-                await db.prepare('INSERT INTO members (admin_id, name, email, avatar_color, status) VALUES (?, ?, ?, ?, ?)').run(adminId, fm.name, fm.email, color, 'active');
-                console.log(`[Scraper] ✓ Created: ${fm.name} (${fm.email})`);
-            } else {
-                await db.prepare("UPDATE members SET email = CASE WHEN ? != '' THEN ? ELSE email END, status = ? WHERE id = ?").run(fm.email, fm.email, 'active', ex.id);
-            }
+    // Step 1: Remove members/pending no longer in Google Family
+    const existing = await db.prepare('SELECT id, name, status FROM members WHERE admin_id = ? AND status IN (?, ?)').all(adminId, 'active', 'pending');
+    for (const em of existing) {
+        if (!scrapedIdentifiers.includes(em.name)) {
+            await db.prepare('UPDATE members SET status = ? WHERE id = ?').run('removed', em.id);
+            console.log(`[Scraper] ✗ Removed (kicked/expired): "${em.name}"`);
         }
     }
+
+    // Step 2: Add/update members with correct status
+    for (const fm of familyMembers) {
+        const newStatus = fm.role === 'pending' ? 'pending' : 'active';
+        const ex = await db.prepare('SELECT id, status FROM members WHERE admin_id = ? AND name = ?').get(adminId, fm.name);
+        if (!ex) {
+            const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+            await db.prepare('INSERT INTO members (admin_id, name, email, avatar_color, status) VALUES (?, ?, ?, ?, ?)').run(adminId, fm.name, fm.email, color, newStatus);
+            console.log(`[Scraper] ✓ ${newStatus === 'pending' ? '⏳ Pending' : 'New member'}: ${fm.name} (${fm.email})`);
+        } else {
+            // Update email + status (pending→active if accepted, or keep current role)
+            await db.prepare("UPDATE members SET email = CASE WHEN ? != '' THEN ? ELSE email END, status = ? WHERE id = ?").run(fm.email, fm.email, newStatus, ex.id);
+            if (ex.status !== newStatus) console.log(`[Scraper] ↔ Status change: ${fm.name} ${ex.status} → ${newStatus}`);
+        }
+    }
+
+    console.log(`[Scraper] Sync complete: ${familyMembers.length} members, removed: ${existing.filter(e => !scrapedIdentifiers.includes(e.name)).length}`);
 
     console.log(`[Scraper] Family result: ${familyMembers.length} members`);
     return familyMembers;
@@ -816,6 +871,11 @@ const AUTO_SYNC_INTERVAL = 10 * 60 * 1000; // 10 minutes
 let autoSyncTimer = null;
 
 function startAutoSync() {
+    // Skip auto-sync khi chạy local/dev
+    if (process.env.NODE_ENV !== 'production') {
+        console.log('[AutoSync] ⏸ Skipped (dev mode - set NODE_ENV=production to enable)');
+        return;
+    }
     if (autoSyncTimer) clearInterval(autoSyncTimer);
     console.log('[AutoSync] Started - will sync every 10 minutes');
     autoSyncTimer = setInterval(async () => {
@@ -829,4 +889,689 @@ function startAutoSync() {
     }, AUTO_SYNC_INTERVAL);
 }
 
-module.exports = { syncAdmin, syncAllAdmins, getSyncStatus, startAutoSync };
+// ========= ADD FAMILY MEMBER =========
+const FAMILY_URL = 'https://myaccount.google.com/family/details?utm_source=g1web&utm_medium=default';
+const INVITE_URL = 'https://myaccount.google.com/family/invitemembers?utm_source=g1web&utm_medium=default';
+
+async function addFamilyMember(adminId, memberEmail) {
+    const admin = await db.prepare('SELECT * FROM admins WHERE id = ?').get(adminId);
+    if (!admin) throw new Error('Admin not found');
+
+    let googlePassword = '';
+    if (admin.google_password) {
+        try { googlePassword = decrypt(admin.google_password) || ''; } catch { googlePassword = ''; }
+    }
+    if (!googlePassword) throw new Error('Admin chưa có Google password');
+
+    syncStatus[adminId] = { status: 'syncing', message: 'Đang mở browser để thêm thành viên...' };
+    let driver = null;
+
+    try {
+        driver = await createBrowser(adminId, admin.email);
+
+        // Go directly to family page — skip credits page
+        syncStatus[adminId].message = 'Đang mở trang gia đình...';
+        console.log(`[AddMember] Navigating directly to family page...`);
+        await driver.get(FAMILY_URL);
+        await driver.sleep(5000);
+
+        let currentUrl = await driver.getCurrentUrl();
+
+        // If redirected to login page → need to login first
+        if (currentUrl.includes('accounts.google.com') || currentUrl.includes('/about')) {
+            console.log('[AddMember] Not logged in, performing login...');
+            syncStatus[adminId].message = 'Đang đăng nhập...';
+            await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
+            // After login, go straight to family page
+            await driver.get(FAMILY_URL);
+            await driver.sleep(5000);
+        } else {
+            console.log('[AddMember] ✓ Already logged in, on family page');
+        }
+
+        // Step 2: Click "+ Gửi lời mời"
+        syncStatus[adminId].message = 'Đang tìm nút "Gửi lời mời"...';
+        console.log(`[AddMember] Looking for invite button...`);
+
+        // Try clicking invite button directly on family page
+        let inviteBtn = await waitAndFind(driver, [
+            'a[href*="invitemembers"]',
+            'button[aria-label*="mời"]',
+            'a[aria-label*="mời"]'
+        ], 5000);
+
+        if (inviteBtn) {
+            await safeClick(driver, inviteBtn);
+            await driver.sleep(3000);
+        } else {
+            // Fallback: navigate directly to invite URL
+            console.log('[AddMember] Invite button not found, navigating directly...');
+            await driver.get(INVITE_URL);
+            await driver.sleep(3000);
+        }
+
+        // Step 3: Find email input and type member email
+        syncStatus[adminId].message = `Đang nhập email ${memberEmail}...`;
+        console.log(`[AddMember] Finding email input...`);
+
+        const emailInput = await waitAndFind(driver, [
+            'input[type="email"]',
+            'input[aria-label*="email"]',
+            'input[aria-label*="tên"]',
+            'input[placeholder*="email"]',
+            'input[placeholder*="tên"]'
+        ], 10000);
+
+        if (!emailInput) {
+            // Take screenshot for debugging
+            const pageText = await driver.findElement(By.css('body')).getText();
+            console.log('[AddMember] Page text:', pageText.substring(0, 500));
+            throw new Error('Không tìm thấy ô nhập email trên trang mời');
+        }
+
+        await safeFill(driver, emailInput, memberEmail);
+        await driver.sleep(2000);
+
+        // Sometimes need to select from autocomplete dropdown
+        try {
+            const suggestion = await waitAndFind(driver, [
+                `[data-email="${memberEmail}"]`,
+                '[role="option"]',
+                '[role="listbox"] [role="option"]'
+            ], 3000);
+            if (suggestion) {
+                await safeClick(driver, suggestion);
+                await driver.sleep(1000);
+            }
+        } catch { /* no autocomplete, that's fine */ }
+
+        // Step 4: Click "Gửi" button
+        syncStatus[adminId].message = 'Đang gửi lời mời...';
+        console.log(`[AddMember] Looking for Send button...`);
+
+        const sendBtn = await waitAndFind(driver, [
+            'button[data-idom-class*="send"]',
+            'button:not([aria-label*="Hủy"])'
+        ], 5000);
+
+        // Try finding by text content
+        let clicked = false;
+        if (!sendBtn) {
+            const buttons = await driver.findElements(By.css('button'));
+            for (const btn of buttons) {
+                const text = await btn.getText();
+                if (text.trim() === 'Gửi' || text.trim() === 'Send') {
+                    await safeClick(driver, btn);
+                    clicked = true;
+                    break;
+                }
+            }
+        } else {
+            await safeClick(driver, sendBtn);
+            clicked = true;
+        }
+
+        if (!clicked) {
+            // Last resort: find by text
+            try {
+                const gửiBtn = await driver.findElement(By.xpath("//button[contains(text(), 'Gửi') or contains(text(), 'Send')]"));
+                await safeClick(driver, gửiBtn);
+                clicked = true;
+            } catch { }
+        }
+
+        if (!clicked) throw new Error('Không tìm thấy nút Gửi');
+
+        await driver.sleep(5000);
+
+        // Step 5: Check for success page + click "Tôi hiểu"
+        currentUrl = await driver.getCurrentUrl();
+        console.log(`[AddMember] After send URL: ${currentUrl}`);
+
+        const pageText = await driver.findElement(By.css('body')).getText();
+        if (pageText.includes('Đã gửi lời mời') || pageText.includes('Invitation sent') || currentUrl.includes('invitationcomplete')) {
+            console.log('[AddMember] ✓ Invitation sent successfully!');
+
+            // Click "Tôi hiểu" button
+            try {
+                const understandBtn = await driver.findElement(By.xpath(
+                    "//button[contains(text(), 'Tôi hiểu') or contains(text(), 'Got it') or contains(text(), 'I understand')]"
+                ));
+                await safeClick(driver, understandBtn);
+                await driver.sleep(2000);
+            } catch {
+                console.log('[AddMember] "Tôi hiểu" button not found, but invitation was sent');
+            }
+
+            syncStatus[adminId] = { status: 'done', message: `✅ Đã gửi lời mời tới ${memberEmail}` };
+            return { success: true, message: `Đã gửi lời mời tới ${memberEmail}` };
+
+        } else if (pageText.includes('không hợp lệ') || pageText.includes('invalid')) {
+            throw new Error(`Email ${memberEmail} không hợp lệ`);
+        } else if (pageText.includes('đã là thành viên') || pageText.includes('already a member')) {
+            throw new Error(`${memberEmail} đã là thành viên rồi`);
+        } else {
+            console.log('[AddMember] Page text after send:', pageText.substring(0, 500));
+            throw new Error('Không xác định được kết quả gửi lời mời');
+        }
+
+    } catch (err) {
+        console.error(`[AddMember] Error:`, err.message);
+        syncStatus[adminId] = { status: 'error', message: err.message };
+        throw err;
+    } finally {
+        if (driver) {
+            try { await driver.quit(); } catch { }
+        }
+    }
+}
+
+// ========= CANCEL INVITATION =========
+async function cancelInvitation(adminId, memberEmail) {
+    const admin = await db.prepare('SELECT * FROM admins WHERE id = ?').get(adminId);
+    if (!admin) throw new Error('Admin not found');
+
+    let googlePassword = '';
+    if (admin.google_password) {
+        try { googlePassword = decrypt(admin.google_password) || ''; } catch { googlePassword = ''; }
+    }
+    if (!googlePassword) throw new Error('Admin chưa có Google password');
+
+    syncStatus[adminId] = { status: 'syncing', message: 'Đang mở browser để hủy lời mời...' };
+    let driver = null;
+
+    try {
+        driver = await createBrowser(adminId, admin.email);
+
+        // Go directly to family page
+        syncStatus[adminId].message = 'Đang mở trang gia đình...';
+        console.log(`[CancelInvite] Navigating to family page...`);
+        await driver.get(FAMILY_URL);
+        await driver.sleep(3000);
+
+        let currentUrl = await driver.getCurrentUrl();
+
+        // If not logged in → login first
+        if (currentUrl.includes('accounts.google.com') || currentUrl.includes('/about')) {
+            console.log('[CancelInvite] Not logged in, performing login...');
+            syncStatus[adminId].message = 'Đang đăng nhập...';
+            await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
+            await driver.get(FAMILY_URL);
+            await driver.sleep(3000);
+        } else {
+            console.log('[CancelInvite] ✓ Already logged in');
+        }
+
+        // Step 1: Click on the pending member email
+        syncStatus[adminId].message = `Đang tìm ${memberEmail}...`;
+        console.log(`[CancelInvite] Looking for: ${memberEmail}`);
+
+        let clicked = false;
+        try {
+            const el = await driver.findElement(By.xpath(`//*[contains(text(), '${memberEmail}')]`));
+            try {
+                const parent = await el.findElement(By.xpath('./ancestor::a[1]'));
+                await safeClick(driver, parent);
+                clicked = true;
+            } catch {
+                await safeClick(driver, el);
+                clicked = true;
+            }
+        } catch { }
+
+        if (!clicked) {
+            throw new Error(`Không tìm thấy ${memberEmail} trên trang gia đình`);
+        }
+
+        await driver.sleep(2000);
+        console.log(`[CancelInvite] ✓ On member detail page`);
+
+        // Step 2: Click "Hủy lời mời" / "Cancel invitation"
+        syncStatus[adminId].message = 'Đang hủy lời mời...';
+
+        let cancelBtn = null;
+        // Try XPath first (any element)
+        const cancelXpaths = [
+            '//*[contains(text(), "Hủy lời mời")]',
+            '//*[contains(text(), "Huỷ lời mời")]',
+            '//*[contains(text(), "Cancel invitation")]'
+        ];
+        for (const xp of cancelXpaths) {
+            try {
+                cancelBtn = await driver.findElement(By.xpath(xp));
+                if (await cancelBtn.isDisplayed()) { console.log(`[CancelInvite] Found via XPath: ${xp}`); break; }
+                cancelBtn = null;
+            } catch { cancelBtn = null; }
+        }
+
+        // JS fallback
+        if (!cancelBtn) {
+            console.log('[CancelInvite] XPath failed, trying JS...');
+            cancelBtn = await driver.executeScript(`
+                const all = document.querySelectorAll('*');
+                for (const el of all) {
+                    if (el.children.length > 2) continue;
+                    const t = (el.textContent || '').trim().toLowerCase();
+                    if (t === 'hủy lời mời' || t === 'huỷ lời mời' || t === 'cancel invitation') return el;
+                }
+                return null;
+            `);
+        }
+
+        if (!cancelBtn) {
+            const pageText = await driver.findElement(By.css('body')).getText();
+            console.log('[CancelInvite] Page text:', pageText.substring(0, 500));
+            throw new Error('Không tìm thấy nút "Hủy lời mời" / "Cancel invitation"');
+        }
+
+        await safeClick(driver, cancelBtn);
+        await driver.sleep(2000);
+        console.log('[CancelInvite] ✓ Clicked cancel');
+
+        // Step 3: Confirm "Có" / "Yes"
+        syncStatus[adminId].message = 'Đang xác nhận...';
+
+        let confirmBtn = null;
+        const confirmXpaths = [
+            '//button[text()="Có"]', '//button[text()="Yes"]',
+            '//*[text()="Có"]', '//*[text()="Yes"]'
+        ];
+        for (const xp of confirmXpaths) {
+            try {
+                confirmBtn = await driver.findElement(By.xpath(xp));
+                if (await confirmBtn.isDisplayed()) { console.log(`[CancelInvite] Confirm found: ${xp}`); break; }
+                confirmBtn = null;
+            } catch { confirmBtn = null; }
+        }
+
+        // JS fallback
+        if (!confirmBtn) {
+            confirmBtn = await driver.executeScript(`
+                const all = document.querySelectorAll('button, a, span, [role="button"]');
+                for (const el of all) {
+                    const t = (el.textContent || '').trim();
+                    if (t === 'Có' || t === 'Yes') return el;
+                }
+                return null;
+            `);
+        }
+
+        if (!confirmBtn) throw new Error('Không tìm thấy nút xác nhận');
+
+        await safeClick(driver, confirmBtn);
+        await driver.sleep(3000);
+        console.log('[CancelInvite] ✓ Confirmed');
+
+        // Step 4: Check we're back on the family details page (no more pending member)
+        currentUrl = await driver.getCurrentUrl();
+        console.log(`[CancelInvite] After cancel URL: ${currentUrl}`);
+
+        if (currentUrl.includes('family/details') || currentUrl.includes('family')) {
+            console.log('[CancelInvite] ✓ Back on family page — invitation cancelled!');
+        }
+
+        // Update DB: mark member as removed
+        await db.prepare("UPDATE members SET status = 'removed' WHERE admin_id = ? AND email = ? AND status = 'pending'").run(adminId, memberEmail);
+        console.log(`[CancelInvite] ✓ DB updated: ${memberEmail} -> removed`);
+
+        syncStatus[adminId] = { status: 'done', message: `✅ Đã hủy lời mời ${memberEmail}` };
+        return { success: true, message: `Đã hủy lời mời ${memberEmail}` };
+
+    } catch (err) {
+        console.error(`[CancelInvite] Error:`, err.message);
+        syncStatus[adminId] = { status: 'error', message: err.message };
+        throw err;
+    } finally {
+        if (driver) {
+            try { await driver.quit(); } catch { }
+        }
+    }
+}
+
+// ========= REMOVE FAMILY MEMBER =========
+async function removeFamilyMember(adminId, memberId) {
+    const admin = await db.prepare('SELECT * FROM admins WHERE id = ?').get(adminId);
+    if (!admin) throw new Error('Admin not found');
+
+    const member = await db.prepare('SELECT * FROM members WHERE id = ? AND admin_id = ?').get(memberId, adminId);
+    if (!member) throw new Error('Member not found');
+
+    let googlePassword = '';
+    if (admin.google_password) {
+        try { googlePassword = decrypt(admin.google_password) || ''; } catch { googlePassword = ''; }
+    }
+    if (!googlePassword) throw new Error('Admin chưa có Google password');
+
+    syncStatus[adminId] = { status: 'syncing', message: `Đang xóa ${member.name}...` };
+    let driver = null;
+
+    try {
+        driver = await createBrowser(adminId, admin.email);
+
+        // Go directly to family page
+        syncStatus[adminId].message = 'Đang mở trang gia đình...';
+        console.log(`[RemoveMember] Navigating to family page...`);
+        await driver.get(FAMILY_URL);
+        await driver.sleep(3000);
+
+        let currentUrl = await driver.getCurrentUrl();
+
+        // If not logged in → login first
+        if (currentUrl.includes('accounts.google.com') || currentUrl.includes('/about')) {
+            console.log('[RemoveMember] Not logged in, performing login...');
+            syncStatus[adminId].message = 'Đang đăng nhập...';
+            await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
+            await driver.get(FAMILY_URL);
+            await driver.sleep(3000);
+        } else {
+            console.log('[RemoveMember] ✓ Already logged in');
+        }
+
+        // Step 1: Click on the member
+        syncStatus[adminId].message = `Đang tìm ${member.name}...`;
+        const memberName = member.name;
+        const memberEmail = member.email;
+        console.log(`[RemoveMember] Looking for: ${memberName} (${memberEmail})`);
+
+        let clicked = false;
+        // Try by name first, then by email
+        for (const searchText of [memberName, memberEmail]) {
+            if (!searchText || clicked) continue;
+            try {
+                const el = await driver.findElement(By.xpath(`//*[contains(text(), '${searchText}')]`));
+                try {
+                    const parent = await el.findElement(By.xpath('./ancestor::a[1]'));
+                    await safeClick(driver, parent);
+                    clicked = true;
+                } catch {
+                    await safeClick(driver, el);
+                    clicked = true;
+                }
+            } catch { }
+        }
+
+        if (!clicked) {
+            throw new Error(`Không tìm thấy ${memberName} trên trang gia đình`);
+        }
+
+        await driver.sleep(2000);
+        console.log(`[RemoveMember] ✓ On member detail page`);
+
+        // Step 2: Click "Xóa thành viên" / "Remove member"
+        syncStatus[adminId].message = 'Đang bấm xóa thành viên...';
+
+        let removeBtn = null;
+        const removeXpaths = [
+            '//*[contains(text(), "Xóa thành viên")]',
+            '//*[contains(text(), "Xoá thành viên")]',
+            '//*[contains(text(), "Remove member")]',
+            '//*[contains(text(), "remove member")]'
+        ];
+        for (const xp of removeXpaths) {
+            try {
+                removeBtn = await driver.findElement(By.xpath(xp));
+                if (await removeBtn.isDisplayed()) { console.log(`[RemoveMember] Found: ${xp}`); break; }
+                removeBtn = null;
+            } catch { removeBtn = null; }
+        }
+
+        // JS fallback
+        if (!removeBtn) {
+            removeBtn = await driver.executeScript(`
+                const all = document.querySelectorAll('*');
+                for (const el of all) {
+                    if (el.children.length > 2) continue;
+                    const t = (el.textContent || '').trim().toLowerCase();
+                    if (t === 'xóa thành viên' || t === 'xoá thành viên' || t === 'remove member') return el;
+                }
+                return null;
+            `);
+        }
+
+        if (!removeBtn) {
+            throw new Error('Không tìm thấy nút "Xóa thành viên"');
+        }
+
+        await safeClick(driver, removeBtn);
+        await driver.sleep(3000);
+        console.log('[RemoveMember] ✓ Clicked remove button');
+
+        // Step 3: Handle verification challenges after clicking remove
+        currentUrl = await driver.getCurrentUrl();
+        let pageText = await driver.findElement(By.css('body')).getText();
+        console.log(`[RemoveMember] After click URL: ${currentUrl}`);
+        console.log(`[RemoveMember] Page text (300): ${pageText.substring(0, 300)}`);
+
+        // Case A: Password re-verification → enter password
+        if (currentUrl.includes('challenge/pwd') || currentUrl.includes('challenge/password') ||
+            pageText.includes('Enter your password') || pageText.includes('Nhập mật khẩu') ||
+            pageText.includes('verify it') || pageText.includes('xác minh danh tính')) {
+
+            console.log('[RemoveMember] Password re-verification required...');
+            syncStatus[adminId].message = 'Đang nhập lại mật khẩu...';
+
+            let passInput = null;
+            try { passInput = await driver.findElement(By.css('input[type="password"]')); } catch { }
+            if (!passInput) { try { passInput = await driver.findElement(By.css('input[name="Passwd"]')); } catch { } }
+
+            if (passInput) {
+                await safeFill(driver, passInput, googlePassword);
+                console.log('[RemoveMember] ✓ Entered password');
+
+                // Click Next
+                let nextBtn = null;
+                for (const xp of ['//button[contains(text(), "Next")]', '//button[contains(text(), "Tiếp")]', '//button[contains(text(), "Sign in")]', '//button[contains(text(), "Đăng nhập")]', '#passwordNext']) {
+                    try {
+                        nextBtn = xp.startsWith('//') ? await driver.findElement(By.xpath(xp)) : await driver.findElement(By.css(xp));
+                        break;
+                    } catch { }
+                }
+                if (nextBtn) await safeClick(driver, nextBtn);
+                await driver.sleep(3000);
+                console.log('[RemoveMember] ✓ Password submitted');
+
+                // Re-read page for next step
+                currentUrl = await driver.getCurrentUrl();
+                pageText = await driver.findElement(By.css('body')).getText();
+                console.log(`[RemoveMember] After password URL: ${currentUrl}`);
+            } else {
+                throw new Error('Không tìm thấy ô nhập mật khẩu');
+            }
+        }
+
+        // Case B: Phone verification required → abort
+        if (pageText.includes('số điện thoại') || pageText.includes('phone number') ||
+            pageText.includes('Dùng một số điện thoại') || pageText.includes('Use your phone') ||
+            currentUrl.includes('challenge/selection')) {
+            console.log('[RemoveMember] ⚠ Phone verification required — aborting');
+            syncStatus[adminId] = { status: 'error', message: `⚠ Account cần xác minh SĐT. Vui lòng xóa ${memberName} thủ công.` };
+            return { success: false, needsManual: true, message: `Account cần xác minh số điện thoại. Vui lòng xóa "${memberName}" thủ công trên Google Family.` };
+        }
+
+        // Case C: 2FA/TOTP required → enter code
+        if (currentUrl.includes('challenge/totp') ||
+            pageText.includes('Authenticator') || pageText.includes('authenticator') ||
+            pageText.includes('Nhập mã') || pageText.includes('Enter code') ||
+            pageText.includes('mã xác minh')) {
+
+            if (admin.totp_secret) {
+                console.log('[RemoveMember] 2FA required, entering TOTP...');
+                syncStatus[adminId].message = 'Đang nhập mã 2FA...';
+
+                // Find TOTP input
+                let totpInput = null;
+                try { totpInput = await driver.findElement(By.css('input[type="tel"]')); } catch { }
+                if (!totpInput) { try { totpInput = await driver.findElement(By.css('input[type="text"]')); } catch { } }
+                if (!totpInput) { try { totpInput = await driver.findElement(By.css('#totpPin')); } catch { } }
+
+                if (totpInput) {
+                    const OTPAuth = require('otpauth');
+                    const totp = new OTPAuth.TOTP({ secret: OTPAuth.Secret.fromBase32(admin.totp_secret.replace(/\s/g, '')), digits: 6, period: 30 });
+                    const code = totp.generate();
+                    await safeFill(driver, totpInput, code);
+                    console.log(`[RemoveMember] Entered TOTP: ${code}`);
+
+                    // Click Next/Verify — try multiple methods
+                    let verifyBtn = null;
+                    for (const xp of ['//button[contains(text(), "Tiếp")]', '//button[contains(text(), "Next")]', '//button[contains(text(), "Xác minh")]', '//button[contains(text(), "Verify")]']) {
+                        try { verifyBtn = await driver.findElement(By.xpath(xp)); break; } catch { }
+                    }
+                    // JS fallback for Next button
+                    if (!verifyBtn) {
+                        verifyBtn = await driver.executeScript(`
+                            const all = document.querySelectorAll('button, [role="button"]');
+                            for (const el of all) {
+                                const t = (el.textContent || '').trim();
+                                if (t === 'Next' || t === 'Tiếp theo' || t === 'Verify' || t === 'Xác minh') return el;
+                            }
+                            return null;
+                        `);
+                    }
+                    if (verifyBtn) {
+                        await safeClick(driver, verifyBtn);
+                        console.log('[RemoveMember] ✓ Clicked Next/Verify');
+                    } else {
+                        console.log('[RemoveMember] ⚠ Next button not found, trying Enter key...');
+                        await totpInput.sendKeys(require('selenium-webdriver').Key.RETURN);
+                    }
+
+                    // Wait for 2FA page to go away (poll up to 15s)
+                    console.log('[RemoveMember] Waiting for 2FA to process...');
+                    for (let i = 0; i < 8; i++) {
+                        await driver.sleep(2000);
+                        currentUrl = await driver.getCurrentUrl();
+                        console.log(`[RemoveMember] 2FA poll ${i + 1}: ${currentUrl.substring(0, 80)}`);
+                        if (!currentUrl.includes('challenge/totp')) {
+                            console.log('[RemoveMember] ✓ 2FA passed!');
+                            break;
+                        }
+                    }
+                } else {
+                    throw new Error('Không tìm thấy ô nhập mã 2FA');
+                }
+            } else {
+                syncStatus[adminId] = { status: 'error', message: `⚠ Account yêu cầu 2FA nhưng chưa có TOTP. Xóa ${memberName} thủ công.` };
+                return { success: false, needsManual: true, message: `Account yêu cầu 2FA nhưng chưa cấu hình TOTP. Vui lòng xóa "${memberName}" thủ công.` };
+            }
+        }
+
+        // Wait for confirmation page (poll up to 20s)
+        console.log('[RemoveMember] Waiting for confirmation page...');
+        syncStatus[adminId].message = 'Đang chờ trang xác nhận...';
+
+        let confirmPageText = '';
+        let onConfirmPage = false;
+        let alreadyOnFamilyPage = false;
+
+        for (let i = 0; i < 10; i++) {
+            await driver.sleep(2000);
+            currentUrl = await driver.getCurrentUrl();
+            confirmPageText = await driver.findElement(By.css('body')).getText();
+            const lowerText = confirmPageText.toLowerCase();
+            console.log(`[RemoveMember] Confirm poll ${i + 1}: URL=${currentUrl.substring(0, 100)}`);
+
+            // Already back on family page → member was removed without confirmation
+            if (currentUrl.includes('family/details')) {
+                console.log('[RemoveMember] ✓ Already back on family page');
+                alreadyOnFamilyPage = true;
+                break;
+            }
+
+            // On confirmation URL
+            if (currentUrl.includes('family/remove') || currentUrl.includes('family%2Fremove')) {
+                console.log('[RemoveMember] ✓ On removal page (URL)');
+                onConfirmPage = true;
+                break;
+            }
+
+            // On confirmation page (text)
+            if (lowerText.includes('thành viên gia đình') || lowerText.includes('remove family member') ||
+                lowerText.includes('mất quyền truy cập') || lowerText.includes('will lose access')) {
+                console.log('[RemoveMember] ✓ On removal page (text)');
+                onConfirmPage = true;
+                break;
+            }
+
+            // Still on challenge → keep waiting
+            if (currentUrl.includes('challenge/')) {
+                console.log('[RemoveMember] Still on challenge, waiting...');
+                continue;
+            }
+
+            // Other page → try to find Remove button
+            console.log('[RemoveMember] Unknown page, checking for button...');
+            onConfirmPage = true;
+            break;
+        }
+
+        // Click "Xóa" / "Remove" on confirmation page
+        let removalConfirmed = false;
+
+        if (alreadyOnFamilyPage) {
+            removalConfirmed = true;
+            console.log('[RemoveMember] Member already removed (no confirmation needed)');
+        } else if (onConfirmPage) {
+            console.log('[RemoveMember] Looking for Remove button...');
+            syncStatus[adminId].message = 'Đang xác nhận xóa...';
+
+            let confirmRemoveBtn = null;
+
+            // JS first — most reliable
+            confirmRemoveBtn = await driver.executeScript(`
+                const all = document.querySelectorAll('button, a, span, [role="button"]');
+                for (const el of all) {
+                    const t = (el.textContent || '').trim();
+                    if (t === 'Xóa' || t === 'Xoá' || t === 'Remove' || t === 'Xoả') return el;
+                }
+                return null;
+            `);
+
+            // XPath fallback
+            if (!confirmRemoveBtn) {
+                for (const xp of [
+                    '//button[text()="Xóa"]', '//button[text()="Xoá"]', '//button[text()="Remove"]',
+                    '//*[text()="Xóa"]', '//*[text()="Xoá"]', '//*[text()="Remove"]'
+                ]) {
+                    try {
+                        confirmRemoveBtn = await driver.findElement(By.xpath(xp));
+                        if (await confirmRemoveBtn.isDisplayed()) break;
+                        confirmRemoveBtn = null;
+                    } catch { confirmRemoveBtn = null; }
+                }
+            }
+
+            if (confirmRemoveBtn) {
+                await safeClick(driver, confirmRemoveBtn);
+                await driver.sleep(3000);
+                console.log('[RemoveMember] ✓ Clicked Remove — confirmed!');
+                removalConfirmed = true;
+            } else {
+                console.log('[RemoveMember] ⚠ Remove button not found, page:', confirmPageText.substring(0, 300));
+            }
+        } else {
+            console.log('[RemoveMember] ⚠ Could not reach confirmation page');
+        }
+
+        // Only update DB if removal was actually confirmed
+        if (removalConfirmed) {
+            await db.prepare("UPDATE members SET status = 'removed' WHERE id = ?").run(memberId);
+            console.log(`[RemoveMember] ✓ DB updated: ${memberName} -> removed`);
+            syncStatus[adminId] = { status: 'done', message: `✅ Đã xóa ${memberName} khỏi nhóm gia đình` };
+            return { success: true, message: `Đã xóa ${memberName} khỏi nhóm gia đình` };
+        } else {
+            syncStatus[adminId] = { status: 'error', message: `⚠ Không thể xóa ${memberName}. Vui lòng thử lại hoặc xóa thủ công.` };
+            return { success: false, message: `Không thể xóa "${memberName}". Vui lòng thử lại hoặc xóa thủ công.` };
+        }
+
+    } catch (err) {
+        console.error(`[RemoveMember] Error:`, err.message);
+        syncStatus[adminId] = { status: 'error', message: err.message };
+        throw err;
+    } finally {
+        if (driver) {
+            try { await driver.quit(); } catch { }
+        }
+    }
+}
+
+module.exports = { syncAdmin, syncAllAdmins, getSyncStatus, startAutoSync, addFamilyMember, cancelInvitation, removeFamilyMember };

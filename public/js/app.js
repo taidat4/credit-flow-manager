@@ -33,8 +33,14 @@ const App = {
             document.getElementById('sidebar').classList.toggle('open');
         });
         document.getElementById('modal-close').addEventListener('click', () => this.closeModal());
-        document.getElementById('modal-overlay').addEventListener('click', (e) => {
-            if (e.target === e.currentTarget) this.closeModal();
+        // Prevent close when dragging from inside modal to outside
+        let mouseDownOnOverlay = false;
+        document.getElementById('modal-overlay').addEventListener('mousedown', (e) => {
+            mouseDownOnOverlay = (e.target === e.currentTarget);
+        });
+        document.getElementById('modal-overlay').addEventListener('mouseup', (e) => {
+            if (mouseDownOnOverlay && e.target === e.currentTarget) this.closeModal();
+            mouseDownOnOverlay = false;
         });
         window.addEventListener('hashchange', () => {
             const page = location.hash.replace('#', '') || 'dashboard';
@@ -159,6 +165,26 @@ const App = {
         toast.innerHTML = `<i class="fas ${icons[type]}"></i> <span>${message}</span>`;
         container.appendChild(toast);
         setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(100px)'; setTimeout(() => toast.remove(), 300); }, 3000);
+    },
+
+    confirm(message) {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+            const box = document.createElement('div');
+            box.style.cssText = 'background:var(--card-bg,#1e1e2e);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:24px;min-width:320px;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.5)';
+            box.innerHTML = `
+                <div style="font-size:15px;font-weight:600;color:var(--text-primary,#fff);margin-bottom:16px;line-height:1.5">${message}</div>
+                <div style="display:flex;gap:8px;justify-content:flex-end">
+                    <button id="_confirm-no" style="padding:8px 20px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:var(--text-secondary,#aaa);cursor:pointer;font-size:13px;font-weight:500">Không</button>
+                    <button id="_confirm-yes" style="padding:8px 20px;border-radius:8px;border:none;background:var(--danger,#ef4444);color:#fff;cursor:pointer;font-size:13px;font-weight:600">Có, xác nhận</button>
+                </div>`;
+            overlay.appendChild(box);
+            document.body.appendChild(overlay);
+            box.querySelector('#_confirm-yes').onclick = () => { overlay.remove(); resolve(true); };
+            box.querySelector('#_confirm-no').onclick = () => { overlay.remove(); resolve(false); };
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+        });
     },
 
     formatNumber(num) { return new Intl.NumberFormat('vi-VN').format(num); },
