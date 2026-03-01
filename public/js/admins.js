@@ -695,17 +695,24 @@ const AdminsPage = {
     try {
       const result = await App.api(`/api/admins/${adminId}/add-member`, 'POST', { email });
       clearInterval(poll);
-      statusEl.style.background = 'rgba(16,185,129,0.1)';
-      statusEl.style.border = '1px solid rgba(16,185,129,0.3)';
-      statusEl.style.color = 'var(--success)';
-      statusEl.innerHTML = `<i class="fas fa-check"></i> ${result.message || 'Đã gửi lời mời thành công!'}`;
-      App.toast(`✅ Đã mời ${email} vào Family`, 'success');
-      // Refresh after 2s
-      setTimeout(async () => {
-        App.closeModal();
-        await this.loadAdmins(true);
-        this.showDetail(adminId);
-      }, 2000);
+      if (result.error || result.success === false) {
+        statusEl.style.background = 'rgba(239,68,68,0.1)';
+        statusEl.style.border = '1px solid rgba(239,68,68,0.3)';
+        statusEl.style.color = 'var(--danger)';
+        statusEl.innerHTML = `<i class="fas fa-times"></i> ${result.error || result.message || 'Thêm thành viên thất bại'}`;
+        actionsEl.style.display = 'flex';
+      } else {
+        statusEl.style.background = 'rgba(16,185,129,0.1)';
+        statusEl.style.border = '1px solid rgba(16,185,129,0.3)';
+        statusEl.style.color = 'var(--success)';
+        statusEl.innerHTML = `<i class="fas fa-check"></i> ${result.message || 'Đã gửi lời mời thành công!'}`;
+        App.toast(`✅ Đã mời ${email} vào Family`, 'success');
+        setTimeout(async () => {
+          App.closeModal();
+          await this.loadAdmins(true);
+          this.showDetail(adminId);
+        }, 2000);
+      }
     } catch (err) {
       clearInterval(poll);
       statusEl.style.background = 'rgba(239,68,68,0.1)';
@@ -722,13 +729,15 @@ const AdminsPage = {
     try {
       App.toast('Đang xóa thành viên...', 'info');
       const result = await App.api(`/api/admins/${adminId}/remove-member`, 'POST', { memberId });
-      if (result.needsManual) {
+      if (result.error || result.success === false) {
+        App.toast(result.error || result.message || `Xóa "${memberName}" thất bại`, 'error');
+      } else if (result.needsManual) {
         App.toast(result.message, 'warning');
       } else {
         App.toast(result.message || `Đã xóa "${memberName}"`, 'success');
+        await this.loadAdmins(true);
+        this.showDetail(adminId);
       }
-      await this.loadAdmins(true);
-      this.showDetail(adminId);
     } catch (err) { App.toast(err.message, 'error'); }
   },
 
