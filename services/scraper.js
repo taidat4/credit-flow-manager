@@ -39,7 +39,7 @@ async function createBrowser(adminId, email) {
 
     const options = new chrome.Options();
     options.addArguments(`--user-data-dir=${profileDir}`);
-    options.addArguments('--headless=new');
+    // options.addArguments('--headless=new'); // TẠM TẮT - debug VPS
     options.addArguments('--no-first-run');
     options.addArguments('--no-default-browser-check');
     options.addArguments('--disable-infobars');
