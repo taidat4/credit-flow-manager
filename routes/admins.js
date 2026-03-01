@@ -70,7 +70,7 @@ try {
       const res = await fetch(`${VPS_URL}/api/admins/${adminId}/cancel-invitation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-VPS-Bridge': 'true', 'X-Sync-Key': SYNC_KEY },
-        body: JSON.stringify({ memberEmail })
+        body: JSON.stringify({ email: memberEmail })
       });
       return await res.json();
     } catch (err) {

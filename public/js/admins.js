@@ -738,9 +738,13 @@ const AdminsPage = {
     try {
       App.toast('Đang hủy lời mời...', 'info');
       const result = await App.api(`/api/admins/${adminId}/cancel-invitation`, 'POST', { email: memberEmail });
-      App.toast(result.message || 'Đã hủy lời mời', 'success');
-      await this.loadAdmins(true);
-      this.showDetail(adminId);
+      if (result.error || result.success === false) {
+        App.toast(result.error || result.message || 'Hủy lời mời thất bại', 'error');
+      } else {
+        App.toast(result.message || 'Đã hủy lời mời', 'success');
+        await this.loadAdmins(true);
+        this.showDetail(adminId);
+      }
     } catch (err) { App.toast(err.message, 'error'); }
   }
 };
