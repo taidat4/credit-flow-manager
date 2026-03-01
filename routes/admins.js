@@ -64,6 +64,32 @@ try {
       return { status: 'error', message: 'Không kết nối được VPS' };
     }
   };
+
+  cancelInvitation = async (adminId, memberEmail) => {
+    try {
+      const res = await fetch(`${VPS_URL}/api/admins/${adminId}/cancel-invitation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-VPS-Bridge': 'true', 'X-Sync-Key': SYNC_KEY },
+        body: JSON.stringify({ memberEmail })
+      });
+      return await res.json();
+    } catch (err) {
+      return { status: 'error', message: 'Không kết nối được VPS' };
+    }
+  };
+
+  removeFamilyMember = async (adminId, memberId) => {
+    try {
+      const res = await fetch(`${VPS_URL}/api/admins/${adminId}/remove-member`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-VPS-Bridge': 'true', 'X-Sync-Key': SYNC_KEY },
+        body: JSON.stringify({ memberId })
+      });
+      return await res.json();
+    } catch (err) {
+      return { status: 'error', message: 'Không kết nối được VPS' };
+    }
+  };
 }
 
 // GET /api/admins
