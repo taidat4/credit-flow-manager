@@ -882,9 +882,72 @@ async function syncAllAdmins() {
     return results;
 }
 
-// Auto sync every 10 minutes
-const AUTO_SYNC_INTERVAL = 10 * 60 * 1000; // 10 minutes
-let autoSyncTimer = null;
+// Plan-based auto sync — each admin syncs at their plan's interval
+let adminSyncTimers = {};
+let autoSyncScheduler = null;
+
+/**
+ * Parse sync_interval text to milliseconds
+ * "5 phút" → 5min, "10 phút" → 10min, "Real-time" → 5min, default 30min
+ */
+function parseSyncInterval(intervalText) {
+    if (!intervalText) return 30 * 60 * 1000; // default 30 min
+    const match = intervalText.match(/(\d+)/);
+    if (match) return parseInt(match[1]) * 60 * 1000;
+    if (intervalText.toLowerCase().includes('real')) return 5 * 60 * 1000;
+    return 30 * 60 * 1000;
+}
+
+async function scheduleAdminSyncs() {
+    // Get all active admins with their user's plan sync_interval
+    const admins = await db.prepare(`
+        SELECT a.id, a.email, a.user_id,
+               COALESCE(p.sync_interval, '30 phút') as sync_interval
+        FROM admins a
+        LEFT JOIN users u ON a.user_id = u.id
+        LEFT JOIN sa_subscriptions s ON s.user_id = u.id AND s.status = 'active'
+        LEFT JOIN sa_plans p ON s.plan_id = p.id
+        WHERE a.status = 'active' AND a.google_password IS NOT NULL AND a.google_password != ''
+    `).all();
+
+    // Clear old timers for admins no longer active
+    for (const id of Object.keys(adminSyncTimers)) {
+        if (!admins.find(a => a.id == id)) {
+            clearInterval(adminSyncTimers[id]);
+            delete adminSyncTimers[id];
+        }
+    }
+
+    // Set up per-admin timers
+    for (const admin of admins) {
+        const intervalMs = parseSyncInterval(admin.sync_interval);
+        const intervalMin = Math.round(intervalMs / 60000);
+
+        // Skip if already running with same interval
+        if (adminSyncTimers[admin.id]?.interval === intervalMs) continue;
+
+        // Clear old timer if exists
+        if (adminSyncTimers[admin.id]?.timer) {
+            clearInterval(adminSyncTimers[admin.id].timer);
+        }
+
+        console.log(`[AutoSync] Admin ${admin.id} (${admin.email}) → sync every ${intervalMin} phút (plan: ${admin.sync_interval})`);
+
+        const timer = setInterval(async () => {
+            console.log(`[AutoSync] Syncing Admin ${admin.id} at ${new Date().toLocaleString('vi-VN')}...`);
+            try {
+                const result = await syncAdmin(admin.id);
+                console.log(`[AutoSync] Admin ${admin.id}: ${result?.status || 'OK'}`);
+            } catch (err) {
+                console.error(`[AutoSync] Admin ${admin.id} error:`, err.message);
+            }
+        }, intervalMs);
+
+        adminSyncTimers[admin.id] = { timer, interval: intervalMs };
+    }
+
+    console.log(`[AutoSync] Scheduled ${admins.length} admins`);
+}
 
 function startAutoSync() {
     // Skip auto-sync khi chạy local/dev
@@ -892,17 +955,17 @@ function startAutoSync() {
         console.log('[AutoSync] ⏸ Skipped (dev mode - set NODE_ENV=production to enable)');
         return;
     }
-    if (autoSyncTimer) clearInterval(autoSyncTimer);
-    console.log('[AutoSync] Started - will sync every 10 minutes');
-    autoSyncTimer = setInterval(async () => {
-        console.log(`[AutoSync] Running auto sync at ${new Date().toLocaleString('vi-VN')}...`);
-        try {
-            const results = await syncAllAdmins();
-            console.log(`[AutoSync] Done. Results:`, results.map(r => `Admin ${r.id}: ${r.success ? 'OK' : r.error}`).join(', '));
-        } catch (err) {
-            console.error('[AutoSync] Error:', err.message);
-        }
-    }, AUTO_SYNC_INTERVAL);
+    if (autoSyncScheduler) clearInterval(autoSyncScheduler);
+
+    console.log('[AutoSync] Started - plan-based intervals');
+
+    // Schedule immediately
+    scheduleAdminSyncs().catch(err => console.error('[AutoSync] Schedule error:', err.message));
+
+    // Re-schedule every 30 min to pick up subscription changes
+    autoSyncScheduler = setInterval(() => {
+        scheduleAdminSyncs().catch(err => console.error('[AutoSync] Re-schedule error:', err.message));
+    }, 30 * 60 * 1000);
 }
 
 // ========= ADD FAMILY MEMBER =========

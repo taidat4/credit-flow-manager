@@ -13,6 +13,7 @@ const AdminsPage = {
   totpIntervals: {},
   syncPolls: {},
   _refreshInterval: null,
+  _syncProgressInterval: null,
   _detailCache: {},  // Store admin detail for toggle/copy operations
 
   async load() {
@@ -57,6 +58,29 @@ const AdminsPage = {
     if (this._refreshInterval) clearInterval(this._refreshInterval);
     this._refreshInterval = setInterval(() => this.loadAdmins(true), 20000);
     console.log('[Admins] Auto-refresh every 20s started');
+    // Also start auto-sync progress polling
+    this.startSyncProgressPoll();
+  },
+
+  // Poll sync-status for all admins every 5s to show auto-sync progress
+  startSyncProgressPoll() {
+    if (this._syncProgressInterval) clearInterval(this._syncProgressInterval);
+    this._syncProgressInterval = setInterval(async () => {
+      for (const a of this.admins) {
+        if (!a.has_google_password || this.syncPolls[a.id]) continue; // skip if already polling
+        try {
+          const status = await App.api(`/api/admins/${a.id}/sync-status`);
+          if (status.status === 'syncing') {
+            this.startSyncPoll(a.id); // reuse existing poll mechanism
+          }
+        } catch { }
+      }
+    }, 5000);
+  },
+
+  // Check if any admin is currently syncing
+  isAnySyncing() {
+    return Object.keys(this.syncPolls).length > 0;
   },
 
   render() {
@@ -648,6 +672,10 @@ const AdminsPage = {
 
   // ========= ADD MEMBER ==========
   showAddMemberModal(adminId, maxMembers, currentCount) {
+    if (this.isAnySyncing()) {
+      App.toast('⏳ Đang đồng bộ, vui lòng đợi sync hoàn tất rồi thao tác', 'warning');
+      return;
+    }
     if (currentCount >= maxMembers) {
       App.toast(`Đã đạt tối đa ${maxMembers} thành viên!`, 'error');
       return;
@@ -725,6 +753,10 @@ const AdminsPage = {
 
   // ========= REMOVE MEMBER ==========
   async removeMember(memberId, memberName, adminId) {
+    if (this.isAnySyncing()) {
+      App.toast('⏳ Đang đồng bộ, vui lòng đợi sync hoàn tất rồi thao tác', 'warning');
+      return;
+    }
     if (!await App.confirm(`Xóa thành viên "${memberName}" khỏi nhóm gia đình Google?`)) return;
     try {
       App.toast('Đang xóa thành viên...', 'info');
@@ -743,6 +775,10 @@ const AdminsPage = {
 
   // ========= CANCEL INVITATION ==========
   async cancelInvitation(adminId, memberEmail) {
+    if (this.isAnySyncing()) {
+      App.toast('⏳ Đang đồng bộ, vui lòng đợi sync hoàn tất rồi thao tác', 'warning');
+      return;
+    }
     if (!await App.confirm(`Hủy lời mời cho "${memberEmail}"?`)) return;
     try {
       App.toast('Đang hủy lời mời...', 'info');
