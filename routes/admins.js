@@ -292,6 +292,10 @@ router.post('/:id/cancel-invitation', requireAuthOrBridge, async (req, res) => {
   if (!email) return res.status(400).json({ error: 'Email là bắt buộc' });
   try {
     const result = await cancelInvitation(parseInt(req.params.id), email);
+    // Also update local DB so UI reflects immediately
+    if (result && (result.success || result.status !== 'error')) {
+      await db.prepare("UPDATE members SET status = 'removed' WHERE admin_id = ? AND email = ? AND status = 'pending'").run(parseInt(req.params.id), email);
+    }
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -304,6 +308,10 @@ router.post('/:id/remove-member', requireAuthOrBridge, async (req, res) => {
   if (!memberId) return res.status(400).json({ error: 'memberId là bắt buộc' });
   try {
     const result = await removeFamilyMember(parseInt(req.params.id), parseInt(memberId));
+    // Also update local DB so UI reflects immediately
+    if (result && result.success) {
+      await db.prepare("UPDATE members SET status = 'removed' WHERE id = ?").run(parseInt(memberId));
+    }
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
