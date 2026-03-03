@@ -446,11 +446,13 @@ async function syncAdmin(adminId) {
         return null;
     }
 
-    syncStatus[adminId] = { status: 'syncing', message: 'Đang khởi tạo browser...', last_sync: null };
+    syncStatus[adminId] = { status: 'syncing', message: 'Đang chờ slot browser...', last_sync: null };
     let driver = null;
 
     try {
+        syncStatus[adminId].message = `Chờ slot... (headless: ${activeHeadless}/${MAX_HEADLESS_BROWSERS}, visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`;
         driver = await createBrowser(adminId, admin.email);
+        syncStatus[adminId].message = 'Đang đăng nhập Google...';
 
         // Auto login!
         await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
@@ -940,114 +942,91 @@ async function syncAllAdmins() {
     return results;
 }
 
-// Plan-based auto sync — each admin syncs at their plan's interval
-let adminSyncTimers = {};
-let autoSyncScheduler = null;
+// ========= SEQUENTIAL ROUND-ROBIN AUTO SYNC =========
+// Syncs ALL admins one-by-one: admin 1 → 2 → 3 → ... → N → wait → repeat
+let syncCycleRunning = false;
+let syncCycleTimer = null;
 
-/**
- * Parse sync_interval text to milliseconds
- * "5 phút" → 5min, "10 phút" → 10min, "Real-time" → 5min, default 30min
- */
 function parseSyncInterval(intervalText) {
-    if (!intervalText) return 30 * 60 * 1000; // default 30 min
+    if (!intervalText) return 30 * 60 * 1000;
     const match = intervalText.match(/(\d+)/);
     if (match) return parseInt(match[1]) * 60 * 1000;
     if (intervalText.toLowerCase().includes('real')) return 5 * 60 * 1000;
     return 30 * 60 * 1000;
 }
 
-async function scheduleAdminSyncs() {
-    // Get all active admins with their user's plan sync_interval
-    const admins = await db.prepare(`
-        SELECT a.id, a.email, a.user_id,
-               COALESCE(p.sync_interval, '30 phút') as sync_interval
-        FROM admins a
-        LEFT JOIN users u ON a.user_id = u.id
-        LEFT JOIN sa_subscriptions s ON s.user_id = u.id AND s.status = 'active' 
-            AND (s.end_date IS NULL OR s.end_date >= CURRENT_DATE)
-        LEFT JOIN sa_plans p ON s.plan_id = p.id
-        WHERE a.status = 'active' AND a.google_password IS NOT NULL AND a.google_password != ''
-    `).all();
-
-    // Clear old timers for admins no longer active
-    for (const id of Object.keys(adminSyncTimers)) {
-        if (!admins.find(a => a.id == id)) {
-            clearInterval(adminSyncTimers[id]);
-            delete adminSyncTimers[id];
-        }
+async function runSyncCycle() {
+    if (syncCycleRunning) {
+        console.log('[AutoSync] Cycle already running, skipping');
+        return;
     }
+    syncCycleRunning = true;
 
-    // Set up per-admin timers with STAGGER to prevent all firing at once
-    const STAGGER_DELAY = 30000; // 30s between each admin start
-    let staggerIndex = 0;
+    try {
+        const admins = await db.prepare(`
+            SELECT a.id, a.email, a.user_id,
+                   COALESCE(p.sync_interval, '30 phút') as sync_interval
+            FROM admins a
+            LEFT JOIN users u ON a.user_id = u.id
+            LEFT JOIN sa_subscriptions s ON s.user_id = u.id AND s.status = 'active' 
+                AND (s.end_date IS NULL OR s.end_date >= CURRENT_DATE)
+            LEFT JOIN sa_plans p ON s.plan_id = p.id
+            WHERE a.status = 'active' AND a.google_password IS NOT NULL AND a.google_password != ''
+            ORDER BY a.id ASC
+        `).all();
 
-    for (const admin of admins) {
-        const intervalMs = parseSyncInterval(admin.sync_interval);
-        const intervalMin = Math.round(intervalMs / 60000);
-
-        // Skip if already running with same interval
-        if (adminSyncTimers[admin.id]?.interval === intervalMs) continue;
-
-        // Clear old timer if exists
-        if (adminSyncTimers[admin.id]?.timer) {
-            clearInterval(adminSyncTimers[admin.id].timer);
+        if (admins.length === 0) {
+            console.log('[AutoSync] No admins to sync');
+            syncCycleRunning = false;
+            return;
         }
 
-        const delay = staggerIndex * STAGGER_DELAY;
-        staggerIndex++;
+        console.log(`[AutoSync] ▶ Starting cycle: ${admins.length} admins`);
+        let ok = 0, fail = 0;
 
-        console.log(`[AutoSync] Admin ${admin.id} (${admin.email}) → sync every ${intervalMin} phút (plan: ${admin.sync_interval}) [start in ${delay / 1000}s]`);
+        for (let i = 0; i < admins.length; i++) {
+            const admin = admins[i];
+            const tag = `[${i + 1}/${admins.length}]`;
+            console.log(`[AutoSync] ${tag} Admin ${admin.id} (${admin.email})...`);
+            try {
+                await syncAdmin(admin.id);
+                ok++;
+                console.log(`[AutoSync] ${tag} ✅ OK`);
+            } catch (err) {
+                fail++;
+                console.error(`[AutoSync] ${tag} ❌ ${err.message}`);
+            }
+            // 5s gap between admins
+            if (i < admins.length - 1) await new Promise(r => setTimeout(r, 5000));
+        }
 
-        // Stagger start: first sync after delay, then repeat at interval
-        const startTimeout = setTimeout(() => {
-            // First sync
-            (async () => {
-                console.log(`[AutoSync] Syncing Admin ${admin.id} at ${new Date().toLocaleString('vi-VN')}...`);
-                try {
-                    const result = await syncAdmin(admin.id);
-                    console.log(`[AutoSync] Admin ${admin.id}: ${result?.status || 'OK'}`);
-                } catch (err) {
-                    console.error(`[AutoSync] Admin ${admin.id} error:`, err.message);
-                }
-            })();
+        console.log(`[AutoSync] ✅ Cycle done! ${ok} OK, ${fail} errors / ${admins.length} total`);
 
-            // Then repeat at interval
-            const timer = setInterval(async () => {
-                console.log(`[AutoSync] Syncing Admin ${admin.id} at ${new Date().toLocaleString('vi-VN')}...`);
-                try {
-                    const result = await syncAdmin(admin.id);
-                    console.log(`[AutoSync] Admin ${admin.id}: ${result?.status || 'OK'}`);
-                } catch (err) {
-                    console.error(`[AutoSync] Admin ${admin.id} error:`, err.message);
-                }
-            }, intervalMs);
+        // Wait the shortest plan interval before next cycle
+        const waitMs = Math.min(...admins.map(a => parseSyncInterval(a.sync_interval)));
+        console.log(`[AutoSync] ⏰ Next cycle in ${Math.round(waitMs / 60000)} phút`);
+        syncCycleTimer = setTimeout(() => {
+            runSyncCycle().catch(e => console.error('[AutoSync] Cycle error:', e.message));
+        }, waitMs);
 
-            adminSyncTimers[admin.id] = { timer, interval: intervalMs };
-        }, delay);
-
-        adminSyncTimers[admin.id] = { timer: startTimeout, interval: intervalMs, isStartup: true };
+    } catch (err) {
+        console.error('[AutoSync] Cycle error:', err.message);
+    } finally {
+        syncCycleRunning = false;
     }
-
-    console.log(`[AutoSync] Scheduled ${admins.length} admins`);
 }
 
 function startAutoSync() {
-    // Skip auto-sync khi chạy local/dev
     if (process.env.NODE_ENV !== 'production') {
-        console.log('[AutoSync] ⏸ Skipped (dev mode - set NODE_ENV=production to enable)');
+        console.log('[AutoSync] ⏸ Skipped (dev mode)');
         return;
     }
-    if (autoSyncScheduler) clearInterval(autoSyncScheduler);
-
-    console.log('[AutoSync] Started - plan-based intervals');
-
-    // Schedule immediately
-    scheduleAdminSyncs().catch(err => console.error('[AutoSync] Schedule error:', err.message));
-
-    // Re-schedule every 30 min to pick up subscription changes
-    autoSyncScheduler = setInterval(() => {
-        scheduleAdminSyncs().catch(err => console.error('[AutoSync] Re-schedule error:', err.message));
-    }, 30 * 60 * 1000);
+    if (syncCycleTimer) clearTimeout(syncCycleTimer);
+    console.log('[AutoSync] ▶ Sequential round-robin mode started');
+    // Start first cycle after 10s (let server boot)
+    setTimeout(() => {
+        runSyncCycle().catch(e => console.error('[AutoSync] First cycle error:', e.message));
+    }, 10000);
 }
 
 // ========= ADD FAMILY MEMBER =========
