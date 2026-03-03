@@ -972,7 +972,7 @@ async function runSyncCycle() {
                 AND (s.end_date IS NULL OR s.end_date >= CURRENT_DATE)
             LEFT JOIN sa_plans p ON s.plan_id = p.id
             WHERE a.status = 'active' AND a.google_password IS NOT NULL AND a.google_password != ''
-            ORDER BY a.id ASC
+            ORDER BY a.created_at DESC
         `).all();
 
         if (admins.length === 0) {
