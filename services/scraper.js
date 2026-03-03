@@ -448,13 +448,12 @@ async function syncAdmin(adminId) {
         return null;
     }
 
-    syncStatus[adminId] = { status: 'syncing', message: 'Đang chờ slot browser...', last_sync: null };
+    syncStatus[adminId] = { status: 'syncing', message: 'Đang chờ...', last_sync: null };
     let driver = null;
 
     try {
-        syncStatus[adminId].message = `Chờ slot... (${activeBrowsers}/${MAX_TOTAL_BROWSERS} browsers, visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`;
         driver = await createBrowser(adminId, admin.email);
-        syncStatus[adminId].message = 'Đang đăng nhập Google...';
+        syncStatus[adminId].message = 'Đang mở Google One...';
 
         // Auto login!
         await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
