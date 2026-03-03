@@ -78,9 +78,9 @@ const AdminsPage = {
     }, 5000);
   },
 
-  // Check if any admin is currently syncing
-  isAnySyncing() {
-    return Object.keys(this.syncPolls).length > 0;
+  // Check if a specific admin is currently syncing
+  isAdminSyncing(adminId) {
+    return !!this.syncPolls[adminId];
   },
 
   render() {
@@ -672,8 +672,8 @@ const AdminsPage = {
 
   // ========= ADD MEMBER ==========
   showAddMemberModal(adminId, maxMembers, currentCount) {
-    if (this.isAnySyncing()) {
-      App.toast('⏳ Đang đồng bộ, vui lòng đợi sync hoàn tất rồi thao tác', 'warning');
+    if (this.isAdminSyncing(adminId)) {
+      App.toast('⏳ Farm này đang đồng bộ, vui lòng đợi sync hoàn tất', 'warning');
       return;
     }
     if (currentCount >= maxMembers) {
@@ -753,8 +753,8 @@ const AdminsPage = {
 
   // ========= REMOVE MEMBER ==========
   async removeMember(memberId, memberName, adminId) {
-    if (this.isAnySyncing()) {
-      App.toast('⏳ Đang đồng bộ, vui lòng đợi sync hoàn tất rồi thao tác', 'warning');
+    if (this.isAdminSyncing(adminId)) {
+      App.toast('⏳ Farm này đang đồng bộ, vui lòng đợi sync hoàn tất', 'warning');
       return;
     }
     if (!await App.confirm(`Xóa thành viên "${memberName}" khỏi nhóm gia đình Google?`)) return;
@@ -775,8 +775,8 @@ const AdminsPage = {
 
   // ========= CANCEL INVITATION ==========
   async cancelInvitation(adminId, memberEmail) {
-    if (this.isAnySyncing()) {
-      App.toast('⏳ Đang đồng bộ, vui lòng đợi sync hoàn tất rồi thao tác', 'warning');
+    if (this.isAdminSyncing(adminId)) {
+      App.toast('⏳ Farm này đang đồng bộ, vui lòng đợi sync hoàn tất', 'warning');
       return;
     }
     if (!await App.confirm(`Hủy lời mời cho "${memberEmail}"?`)) return;

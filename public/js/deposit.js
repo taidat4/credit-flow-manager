@@ -158,6 +158,21 @@ const DepositPage = {
             <button class="btn btn-danger btn-full" style="margin-top:12px" onclick="DepositPage.cancelInvoice()">
               <i class="fas fa-times"></i> Hủy hóa đơn
             </button>
+
+            <!-- Countdown timer -->
+            <div id="payment-countdown" style="margin-top:16px;padding:16px;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:12px;text-align:center;display:none">
+              <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px">
+                <i class="fas fa-spinner fa-spin" style="color:var(--info)"></i>
+                <span style="font-weight:700;color:var(--info)">Đang kiểm tra giao dịch...</span>
+              </div>
+              <div style="display:flex;justify-content:center;gap:24px;font-size:13px">
+                <span>⏱ Đã chờ: <strong id="elapsed-time" style="color:var(--warning)">0:00</strong></span>
+                <span>🔄 Kiểm tra: <strong id="check-count" style="color:var(--success)">0</strong> lần</span>
+              </div>
+              <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">
+                Kiểm tra tiếp sau <strong id="next-check-countdown" style="color:var(--info);font-size:14px">3</strong>s
+              </div>
+            </div>
           </div>
         </div>
 
@@ -345,9 +360,35 @@ const DepositPage = {
   // ===== Payment polling (every 3s when invoice active) =====
   _pollInterval: null,
   _initialBalance: 0,
+  _countdownInterval: null,
+  _checkCount: 0,
+  _invoiceStartTime: null,
 
   _startPaymentPolling(expectedAmount) {
     this._stopPaymentPolling(); // Clear any existing
+    this._checkCount = 0;
+    this._invoiceStartTime = Date.now();
+
+    // Show countdown UI
+    const countdownEl = document.getElementById('payment-countdown');
+    if (countdownEl) countdownEl.style.display = 'block';
+
+    // Start 1-second countdown ticker
+    let nextCheckIn = 3;
+    this._countdownInterval = setInterval(() => {
+      // Update elapsed time
+      const elapsed = Math.floor((Date.now() - this._invoiceStartTime) / 1000);
+      const min = Math.floor(elapsed / 60);
+      const sec = elapsed % 60;
+      const elapsedEl = document.getElementById('elapsed-time');
+      if (elapsedEl) elapsedEl.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
+
+      // Update next check countdown
+      nextCheckIn--;
+      if (nextCheckIn < 0) nextCheckIn = 3;
+      const nextEl = document.getElementById('next-check-countdown');
+      if (nextEl) nextEl.textContent = nextCheckIn;
+    }, 1000);
 
     // Store initial balance to detect changes
     App.api('/api/subscription/my').then(data => {
@@ -356,6 +397,11 @@ const DepositPage = {
 
     console.log('[Deposit] Started payment polling (every 3s)');
     this._pollInterval = setInterval(async () => {
+      this._checkCount++;
+      nextCheckIn = 3;
+      const countEl = document.getElementById('check-count');
+      if (countEl) countEl.textContent = this._checkCount;
+
       try {
         const result = await App.api('/api/subscription/check-deposit');
 
@@ -410,6 +456,12 @@ const DepositPage = {
       // Tell backend to stop fast-check
       App.api('/api/subscription/stop-check', 'POST').catch(() => { });
     }
+    if (this._countdownInterval) {
+      clearInterval(this._countdownInterval);
+      this._countdownInterval = null;
+    }
+    const countdownEl = document.getElementById('payment-countdown');
+    if (countdownEl) countdownEl.style.display = 'none';
   },
 
   cancelInvoice() {
