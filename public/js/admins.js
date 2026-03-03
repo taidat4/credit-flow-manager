@@ -70,8 +70,12 @@ const AdminsPage = {
         if (!a.has_google_password || this.syncPolls[a.id]) continue; // skip if already polling
         try {
           const status = await App.api(`/api/admins/${a.id}/sync-status`);
+          const el = document.getElementById(`sync-status-${a.id}`);
           if (status.status === 'syncing') {
             this.startSyncPoll(a.id); // reuse existing poll mechanism
+          } else if (status.status === 'error' && el) {
+            // Show persistent error on card
+            el.innerHTML = `<div style="font-size:12px;color:var(--danger);display:flex;align-items:center;gap:6px"><i class="fas fa-exclamation-circle"></i> ${status.message}</div>`;
           }
         } catch { }
       }

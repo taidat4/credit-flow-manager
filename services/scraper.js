@@ -307,7 +307,8 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
 
     const passwordInput = await waitAndFind(driver, ['input[type="password"]'], 15000);
     if (!passwordInput) {
-        throw new Error('Không tìm thấy ô nhập mật khẩu');
+        syncStatus[adminId].message = '❌ Không tìm thấy ô mật khẩu — Google yêu cầu xác minh!';
+        throw new Error('Không tìm thấy ô nhập mật khẩu — Google có thể đang yêu cầu xác minh bổ sung');
     }
 
     console.log('[Login] Typing password...');
@@ -451,6 +452,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
         return true;
     }
 
+    syncStatus[adminId].message = '❌ Đăng nhập không thành công!';
     throw new Error('Đăng nhập không thành công - URL: ' + currentUrl.substring(0, 100));
 }
 
