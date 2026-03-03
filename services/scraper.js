@@ -420,18 +420,29 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
             }
 
             await driver.sleep(5000);
-        } else {
-            console.log('[Login] ⚠ Could not find TOTP input — wrong 2FA secret?');
-            syncStatus[adminId].message = '❌ Không nhập được 2FA — hãy kiểm tra lại TOTP secret!';
 
-            // Wait up to 60s for manual 2FA
-            const start = Date.now();
-            while (Date.now() - start < 60000) {
-                await driver.sleep(3000);
-                currentUrl = await driver.getCurrentUrl();
-                if (currentUrl.includes('one.google.com') && !currentUrl.includes('accounts.google.com')) break;
-                if (!currentUrl.includes('challenge') && !currentUrl.includes('signin')) break;
+            // Check if 2FA failed (wrong code)
+            try {
+                const postTotpUrl = await driver.getCurrentUrl();
+                const postTotpSource = await driver.getPageSource();
+                const wrongCodeKeywords = [
+                    'Wrong code', 'Sai mã', 'incorrect', 'Mã không đúng',
+                    'Try again', 'Thử lại', 'không hợp lệ', 'invalid'
+                ];
+                const isWrongCode = wrongCodeKeywords.some(kw => postTotpSource.includes(kw));
+                const stillOnChallenge = postTotpUrl.includes('challenge');
+
+                if (isWrongCode || stillOnChallenge) {
+                    syncStatus[adminId].message = '❌ Sai mã 2FA — hãy kiểm tra lại TOTP secret!';
+                    throw new Error('Sai mã 2FA — TOTP secret có thể sai hoặc hết hạn');
+                }
+            } catch (e) {
+                if (e.message.includes('2FA')) throw e;
             }
+        } else {
+            console.log('[Login] ❌ Could not find TOTP input — skipping');
+            syncStatus[adminId].message = '❌ Không tìm thấy ô 2FA — hãy kiểm tra lại TOTP secret!';
+            throw new Error('Không tìm thấy ô nhập 2FA — TOTP secret có thể sai');
         }
     }
 

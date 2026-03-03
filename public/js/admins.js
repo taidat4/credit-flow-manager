@@ -51,7 +51,26 @@ const AdminsPage = {
     try {
       this.admins = await App.api('/api/admins');
       this.render();
+      // Re-apply sync statuses after render (so errors persist across re-renders)
+      this.refreshSyncStatuses();
     } catch (err) { if (!silent) App.toast('Lỗi tải admins', 'error'); }
+  },
+
+  async refreshSyncStatuses() {
+    for (const a of this.admins) {
+      if (!a.has_google_password) continue;
+      try {
+        const status = await App.api(`/api/admins/${a.id}/sync-status`);
+        const el = document.getElementById(`sync-status-${a.id}`);
+        if (!el) continue;
+        if (status.status === 'error') {
+          el.innerHTML = `<div style="font-size:12px;color:var(--danger);display:flex;align-items:center;gap:6px"><i class="fas fa-exclamation-circle"></i> ${status.message}</div>`;
+        } else if (status.status === 'syncing') {
+          el.innerHTML = `<div style="font-size:12px;color:var(--info);display:flex;align-items:center;gap:6px"><i class="fas fa-spinner fa-spin"></i> ${status.message}</div>`;
+          if (!this.syncPolls[a.id]) this.startSyncPoll(a.id);
+        }
+      } catch { }
+    }
   },
 
   startAutoRefresh() {
