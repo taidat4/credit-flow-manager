@@ -80,10 +80,12 @@ async function createBrowser(adminId, email, forceVisible = false) {
         fs.mkdirSync(profileDir, { recursive: true });
     }
 
-    // Check if admin has ever synced successfully (DB is source of truth, not file existence)
-    // Chrome creates Cookies/Login Data files on first launch even without login!
+    // Check if admin has session — either last_sync in DB OR cookies in profile
     const adminRecord = await db.prepare('SELECT last_sync FROM admins WHERE id = ?').get(adminId);
-    const hasSession = !!(adminRecord && adminRecord.last_sync);
+    const hasDbSync = !!(adminRecord && adminRecord.last_sync);
+    const hasCookies = fs.existsSync(path.join(profileDir, 'Default', 'Cookies'))
+        || fs.existsSync(path.join(profileDir, 'Cookies'));
+    const hasSession = hasDbSync || hasCookies;
 
     const useHeadless = hasSession && !forceVisible;
 
@@ -940,36 +942,46 @@ async function saveData(adminId, creditData, storageData) {
     }
 }
 
-async function syncAllAdmins() {
-    const admins = await db.prepare(`
-        SELECT id FROM admins 
-        WHERE status = 'active' AND google_password IS NOT NULL AND google_password != ''
-        ORDER BY created_at DESC
-    `).all();
-    console.log(`[Sync] Starting sync: ${admins.length} admins (max ${MAX_TOTAL_BROWSERS} browsers)`);
+// Global sync mutex — prevents syncAllAdmins + runSyncCycle from running simultaneously
+let globalSyncRunning = false;
 
-    let ok = 0, fail = 0;
-    // Fire ALL — semaphore limits to MAX_TOTAL_BROWSERS, FIFO queue preserves order
-    await Promise.allSettled(
-        admins.map(async (admin, i) => {
-            const tag = `[${i + 1}/${admins.length}]`;
-            try {
-                await syncAdmin(admin.id);
-                ok++;
-                console.log(`[Sync] ${tag} Admin ${admin.id}: ✅`);
-            } catch (err) {
-                fail++;
-                console.error(`[Sync] ${tag} Admin ${admin.id}: ❌ ${err.message}`);
-            }
-        })
-    );
-    console.log(`[Sync] All done! ${ok} OK, ${fail} errors / ${admins.length}`);
-    return { ok, fail, total: admins.length };
+async function syncAllAdmins() {
+    if (globalSyncRunning) {
+        console.log('[Sync] ⏸ Another sync is already running, skipping');
+        return { ok: 0, fail: 0, total: 0, skipped: true };
+    }
+    globalSyncRunning = true;
+    try {
+        const admins = await db.prepare(`
+            SELECT id FROM admins 
+            WHERE status = 'active' AND google_password IS NOT NULL AND google_password != ''
+            ORDER BY created_at DESC
+        `).all();
+        console.log(`[Sync] Starting sync: ${admins.length} admins (max ${MAX_TOTAL_BROWSERS} browsers)`);
+
+        let ok = 0, fail = 0;
+        await Promise.allSettled(
+            admins.map(async (admin, i) => {
+                const tag = `[${i + 1}/${admins.length}]`;
+                try {
+                    await syncAdmin(admin.id);
+                    ok++;
+                    console.log(`[Sync] ${tag} Admin ${admin.id}: ✅`);
+                } catch (err) {
+                    fail++;
+                    console.error(`[Sync] ${tag} Admin ${admin.id}: ❌ ${err.message}`);
+                }
+            })
+        );
+        console.log(`[Sync] All done! ${ok} OK, ${fail} errors / ${admins.length}`);
+        return { ok, fail, total: admins.length };
+    } finally {
+        globalSyncRunning = false;
+    }
 }
 
 // ========= SEQUENTIAL ROUND-ROBIN AUTO SYNC =========
-// Syncs ALL admins one-by-one: admin 1 → 2 → 3 → ... → N → wait → repeat
-let syncCycleRunning = false;
+// Syncs ALL admins: fire all → semaphore limits to 7 → wait → repeat
 let syncCycleTimer = null;
 
 function parseSyncInterval(intervalText) {
@@ -981,11 +993,15 @@ function parseSyncInterval(intervalText) {
 }
 
 async function runSyncCycle() {
-    if (syncCycleRunning) {
-        console.log('[AutoSync] Cycle already running, skipping');
+    if (globalSyncRunning) {
+        console.log('[AutoSync] Another sync running, skipping this cycle');
+        // Retry in 60s
+        syncCycleTimer = setTimeout(() => {
+            runSyncCycle().catch(e => console.error('[AutoSync] Cycle error:', e.message));
+        }, 60000);
         return;
     }
-    syncCycleRunning = true;
+    globalSyncRunning = true;
 
     try {
         const admins = await db.prepare(`
@@ -1035,7 +1051,7 @@ async function runSyncCycle() {
     } catch (err) {
         console.error('[AutoSync] Cycle error:', err.message);
     } finally {
-        syncCycleRunning = false;
+        globalSyncRunning = false;
     }
 }
 
