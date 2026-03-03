@@ -905,7 +905,8 @@ async function scheduleAdminSyncs() {
                COALESCE(p.sync_interval, '30 phút') as sync_interval
         FROM admins a
         LEFT JOIN users u ON a.user_id = u.id
-        LEFT JOIN sa_subscriptions s ON s.user_id = u.id AND s.status = 'active'
+        LEFT JOIN sa_subscriptions s ON s.user_id = u.id AND s.status = 'active' 
+            AND (s.end_date IS NULL OR s.end_date >= CURRENT_DATE)
         LEFT JOIN sa_plans p ON s.plan_id = p.id
         WHERE a.status = 'active' AND a.google_password IS NOT NULL AND a.google_password != ''
     `).all();
