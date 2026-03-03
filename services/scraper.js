@@ -180,7 +180,8 @@ async function safeClick(driver, element) {
 }
 
 /**
- * Helper: safe fill input (clear + type, same as MY_BOT _safe_fill)
+ * Helper: safe fill input (clear + type)
+ * Uses single sendKeys() to prevent keystroke interleaving between multiple browsers
  */
 async function safeFill(driver, element, text) {
     const str = text ? String(text) : '';
@@ -188,11 +189,8 @@ async function safeFill(driver, element, text) {
     await driver.sleep(200);
     await element.clear();
     await driver.sleep(200);
-    // Type character by character for human-like behavior
-    for (const char of str) {
-        await element.sendKeys(char);
-        await driver.sleep(50 + Math.random() * 50);
-    }
+    // Send entire text at once — prevents interleaving when multiple browsers run
+    await element.sendKeys(str);
 }
 
 /**
