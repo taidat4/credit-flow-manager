@@ -380,15 +380,27 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
         console.log('[Login] 2FA challenge detected, entering TOTP...');
         syncStatus[adminId].message = 'Đang nhập mã 2FA...';
 
-        // Sometimes Google shows multiple 2FA options, try to select TOTP/Authenticator
+        // Google may show "Choose how you want to sign in" page — click TOTP/Authenticator option
         try {
-            const totpOption = await waitAndFind(driver, [
-                '[data-challengetype="6"]',  // TOTP authenticator option
+            // Method 1: data attribute selector
+            let totpOption = await waitAndFind(driver, [
+                '[data-challengetype="6"]',
                 'div[data-challengeid="6"]'
             ], 3000);
+
+            // Method 2: text-based — "Google Authenticator" or "verification code"
+            if (!totpOption) {
+                try {
+                    totpOption = await driver.findElement(By.xpath(
+                        "//*[contains(text(), 'Google Authenticator') or contains(text(), 'Authenticator app') or contains(text(), 'verification code') or contains(text(), 'Ứng dụng Authenticator') or contains(text(), 'mã xác minh')]"
+                    ));
+                } catch { }
+            }
+
             if (totpOption) {
+                console.log('[Login] Found TOTP/Authenticator option, clicking...');
                 await safeClick(driver, totpOption);
-                await driver.sleep(2000);
+                await driver.sleep(3000);
             }
         } catch { }
 
