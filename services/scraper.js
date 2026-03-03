@@ -342,6 +342,33 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
     currentUrl = await driver.getCurrentUrl();
     console.log(`[Login] Post-password URL: ${currentUrl}`);
 
+    // Detect phone verification (can't automate — tell user to remove phone, use TOTP only)
+    if (currentUrl.includes('challenge')) {
+        try {
+            const pageSource = await driver.getPageSource();
+            const phoneKeywords = [
+                'Open the Gmail app', 'Mở ứng dụng Gmail',
+                'verify your phone', 'xác minh điện thoại',
+                'Verify it\'s you', 'Xác minh danh tính',
+                'sent a notification', 'đã gửi thông báo',
+                'Tap Yes on the prompt', 'Nhấn Có trên lời nhắc',
+                'challengetype/12', 'challengetype/6/2',
+                'Open the Gmail app on iPhone', 'Open the Gmail app on Android'
+            ];
+            const isPhoneChallenge = phoneKeywords.some(kw => pageSource.includes(kw));
+            // Also check if it's NOT a TOTP page (which has totpPin input)
+            const hasTotpInput = pageSource.includes('totpPin') || pageSource.includes('name="totpPin"');
+
+            if (isPhoneChallenge && !hasTotpInput) {
+                console.log('[Login] ❌ Phone verification detected — cannot automate');
+                syncStatus[adminId].message = '❌ Yêu cầu xác minh SĐT — hãy xóa Phone, chỉ dùng 2FA!';
+                throw new Error('Tài khoản yêu cầu xác minh số điện thoại. Hãy xóa phone verification và chỉ để 2FA (TOTP).');
+            }
+        } catch (e) {
+            if (e.message.includes('xác minh số điện thoại')) throw e;
+        }
+    }
+
     // Check if we need 2FA
     if (totpSecret && (currentUrl.includes('challenge') || currentUrl.includes('signin/v2'))) {
         console.log('[Login] 2FA challenge detected, entering TOTP...');
