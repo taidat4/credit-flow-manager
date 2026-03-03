@@ -1,12 +1,16 @@
 /* ========================================
    MB Bank Auto-Check Service
    Uses apicanhan.com API with params: key, username, password, accountNo
-   Only checks when there are active invoices (on-demand)
+   ALWAYS-ON background polling — never stops
    ======================================== */
 
 const db = require('../db/database');
 
 let config = {};
+let pollTimer = null;
+let currentInterval = 30000; // default 30s
+const SLOW_INTERVAL = 30000;  // 30s background check
+const FAST_INTERVAL = 3000;   // 3s when invoice active
 
 async function loadConfig() {
     const keys = ['mb_api_key', 'mb_account_no', 'mb_bot_token', 'mb_chat_id', 'mb_session_id', 'mb_token', 'mb_cookie', 'mb_device_id', 'mb_user', 'mb_password', 'mb_id_run'];
@@ -40,7 +44,6 @@ async function loadProcessedTxns() {
 
 async function fetchTransactions() {
     if (!config.mb_api_key || !config.mb_account_no) {
-        console.log('[MBBank] Missing API key or account number, skip fetch');
         return [];
     }
 
@@ -65,7 +68,7 @@ async function fetchTransactions() {
 
         const txList = data.transactions || [];
         if (!Array.isArray(txList)) { console.log('[MBBank] transactions is not an array'); return []; }
-        if (txList.length > 0) console.log(`[MBBank] ✅ Got ${txList.length} transactions from API`);
+        if (txList.length > 0) console.log(`[MBBank] Got ${txList.length} transactions from API`);
         return txList;
     } catch (err) {
         if (err.name === 'AbortError') console.log('[MBBank] API request timeout (30s)');
@@ -137,14 +140,71 @@ async function sendTelegramNotify(user, amount, newBalance, txnRef) {
     } catch { }
 }
 
+// ========= ALWAYS-ON BACKGROUND POLLING =========
+let consecutiveErrors = 0;
+
+function startPollingLoop() {
+    if (pollTimer) clearInterval(pollTimer);
+
+    pollTimer = setInterval(async () => {
+        try {
+            if (!config.mb_api_key || !config.mb_account_no) {
+                // No config yet — try reloading every few cycles
+                if (consecutiveErrors++ > 5) {
+                    await loadConfig();
+                    consecutiveErrors = 0;
+                }
+                return;
+            }
+            await checkTransactions();
+            consecutiveErrors = 0;
+        } catch (err) {
+            consecutiveErrors++;
+            console.error(`[MBBank] Poll error (${consecutiveErrors}):`, err.message);
+            // Auto-reload config after 3 consecutive errors
+            if (consecutiveErrors >= 3) {
+                console.log('[MBBank] Too many errors, reloading config...');
+                await loadConfig();
+                consecutiveErrors = 0;
+            }
+        }
+    }, currentInterval);
+
+    console.log(`[MBBank] Polling active (every ${currentInterval / 1000}s)`);
+}
+
 async function startAutoCheck() {
     await loadConfig();
     await loadProcessedTxns();
-    console.log('[MBBank] Service ready (on-demand check only, no background polling)');
+    currentInterval = SLOW_INTERVAL;
+    startPollingLoop();
+    console.log('[MBBank] ✅ Service started — ALWAYS-ON background polling (30s)');
 }
 
-function stopAutoCheck() { }
-function startFastCheck() { }
-function stopFastCheck() { }
+function stopAutoCheck() {
+    // Never actually stop — just log
+    console.log('[MBBank] stopAutoCheck called but polling continues (always-on)');
+}
+
+function startFastCheck() {
+    if (currentInterval === FAST_INTERVAL) return; // already fast
+    currentInterval = FAST_INTERVAL;
+    startPollingLoop();
+    console.log('[MBBank] ⚡ Switched to FAST polling (3s) — invoice active');
+
+    // Auto revert to slow after 10 minutes (safety net)
+    setTimeout(() => {
+        if (currentInterval === FAST_INTERVAL) {
+            stopFastCheck();
+        }
+    }, 10 * 60 * 1000);
+}
+
+function stopFastCheck() {
+    if (currentInterval === SLOW_INTERVAL) return; // already slow
+    currentInterval = SLOW_INTERVAL;
+    startPollingLoop();
+    console.log('[MBBank] Reverted to background polling (30s)');
+}
 
 module.exports = { checkTransactions, startAutoCheck, stopAutoCheck, reloadConfig, startFastCheck, stopFastCheck };
