@@ -328,12 +328,15 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
     try {
         const pageSource = await driver.getPageSource();
         if (pageSource.includes('Sai mật khẩu') || pageSource.includes('Wrong password')) {
-            throw new Error('Sai mật khẩu');
+            syncStatus[adminId].message = '❌ Sai mật khẩu — hãy cập nhật password!';
+            throw new Error('Sai mật khẩu — hãy cập nhật password!');
         }
         if (pageSource.includes('đã bị xóa') || pageSource.includes('has been deleted')) {
+            syncStatus[adminId].message = '❌ Tài khoản đã bị xóa!';
             throw new Error('Tài khoản đã bị xóa');
         }
         if (pageSource.includes('chặn đăng nhập') || pageSource.includes('blocked sign-in')) {
+            syncStatus[adminId].message = '❌ Google chặn đăng nhập!';
             throw new Error('Google đã chặn đăng nhập từ thiết bị này');
         }
     } catch (e) {
@@ -417,8 +420,8 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
 
             await driver.sleep(5000);
         } else {
-            console.log('[Login] ⚠ Could not find TOTP input, waiting for manual 2FA...');
-            syncStatus[adminId].message = '⏳ Hãy nhập mã 2FA trên cửa sổ Chrome...';
+            console.log('[Login] ⚠ Could not find TOTP input — wrong 2FA secret?');
+            syncStatus[adminId].message = '❌ Không nhập được 2FA — hãy kiểm tra lại TOTP secret!';
 
             // Wait up to 60s for manual 2FA
             const start = Date.now();
