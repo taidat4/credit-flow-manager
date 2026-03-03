@@ -388,19 +388,35 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
                 'div[data-challengeid="6"]'
             ], 3000);
 
-            // Method 2: text-based — "Google Authenticator" or "verification code"
+            // Method 2: text-based — uses "." instead of "text()" to match text inside child elements (e.g. <b>Google</b> Authenticator)
             if (!totpOption) {
-                try {
-                    totpOption = await driver.findElement(By.xpath(
-                        "//*[contains(text(), 'Google Authenticator') or contains(text(), 'Authenticator app') or contains(text(), 'verification code') or contains(text(), 'Ứng dụng Authenticator') or contains(text(), 'mã xác minh')]"
-                    ));
-                } catch { }
+                const xpaths = [
+                    "//*[contains(., 'Authenticator') and not(self::script)]",
+                    "//*[contains(., 'verification code') and contains(., 'Authenticator')]",
+                    "//*[contains(., 'mã xác minh') and contains(., 'Authenticator')]"
+                ];
+                for (const xp of xpaths) {
+                    try {
+                        const els = await driver.findElements(By.xpath(xp));
+                        // Click the most specific (smallest/deepest) element
+                        for (const el of els) {
+                            const tag = await el.getTagName();
+                            if (['li', 'div', 'button', 'a', 'span'].includes(tag.toLowerCase())) {
+                                totpOption = el;
+                                break;
+                            }
+                        }
+                        if (totpOption) break;
+                    } catch { }
+                }
             }
 
             if (totpOption) {
                 console.log('[Login] Found TOTP/Authenticator option, clicking...');
                 await safeClick(driver, totpOption);
                 await driver.sleep(3000);
+            } else {
+                console.log('[Login] No Authenticator option found on selection page');
             }
         } catch { }
 
