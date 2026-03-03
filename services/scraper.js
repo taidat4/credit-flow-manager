@@ -981,23 +981,40 @@ async function runSyncCycle() {
             return;
         }
 
-        console.log(`[AutoSync] ▶ Starting cycle: ${admins.length} admins`);
+        const BATCH_SIZE = MAX_HEADLESS_BROWSERS; // 5 browsers per batch
+        const totalBatches = Math.ceil(admins.length / BATCH_SIZE);
+        console.log(`[AutoSync] ▶ Starting cycle: ${admins.length} admins in ${totalBatches} batches of ${BATCH_SIZE}`);
         let ok = 0, fail = 0;
 
-        for (let i = 0; i < admins.length; i++) {
-            const admin = admins[i];
-            const tag = `[${i + 1}/${admins.length}]`;
-            console.log(`[AutoSync] ${tag} Admin ${admin.id} (${admin.email})...`);
-            try {
-                await syncAdmin(admin.id);
-                ok++;
-                console.log(`[AutoSync] ${tag} ✅ OK`);
-            } catch (err) {
-                fail++;
-                console.error(`[AutoSync] ${tag} ❌ ${err.message}`);
+        for (let batch = 0; batch < totalBatches; batch++) {
+            const start = batch * BATCH_SIZE;
+            const end = Math.min(start + BATCH_SIZE, admins.length);
+            const batchAdmins = admins.slice(start, end);
+            const batchNum = batch + 1;
+
+            console.log(`[AutoSync] === Batch ${batchNum}/${totalBatches} (Admin ${start + 1}-${end}/${admins.length}) ===`);
+
+            // Sync all admins in this batch in parallel
+            const results = await Promise.allSettled(
+                batchAdmins.map(async (admin, idx) => {
+                    const tag = `[${start + idx + 1}/${admins.length}]`;
+                    console.log(`[AutoSync] ${tag} Admin ${admin.id} (${admin.email})...`);
+                    try {
+                        await syncAdmin(admin.id);
+                        ok++;
+                        console.log(`[AutoSync] ${tag} ✅ OK`);
+                    } catch (err) {
+                        fail++;
+                        console.error(`[AutoSync] ${tag} ❌ ${err.message}`);
+                    }
+                })
+            );
+
+            // 5s gap between batches
+            if (batch < totalBatches - 1) {
+                console.log(`[AutoSync] Batch ${batchNum} done, next batch in 5s...`);
+                await new Promise(r => setTimeout(r, 5000));
             }
-            // 5s gap between admins
-            if (i < admins.length - 1) await new Promise(r => setTimeout(r, 5000));
         }
 
         console.log(`[AutoSync] ✅ Cycle done! ${ok} OK, ${fail} errors / ${admins.length} total`);
