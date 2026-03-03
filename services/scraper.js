@@ -970,7 +970,10 @@ async function scheduleAdminSyncs() {
         }
     }
 
-    // Set up per-admin timers
+    // Set up per-admin timers with STAGGER to prevent all firing at once
+    const STAGGER_DELAY = 30000; // 30s between each admin start
+    let staggerIndex = 0;
+
     for (const admin of admins) {
         const intervalMs = parseSyncInterval(admin.sync_interval);
         const intervalMin = Math.round(intervalMs / 60000);
@@ -983,19 +986,39 @@ async function scheduleAdminSyncs() {
             clearInterval(adminSyncTimers[admin.id].timer);
         }
 
-        console.log(`[AutoSync] Admin ${admin.id} (${admin.email}) → sync every ${intervalMin} phút (plan: ${admin.sync_interval})`);
+        const delay = staggerIndex * STAGGER_DELAY;
+        staggerIndex++;
 
-        const timer = setInterval(async () => {
-            console.log(`[AutoSync] Syncing Admin ${admin.id} at ${new Date().toLocaleString('vi-VN')}...`);
-            try {
-                const result = await syncAdmin(admin.id);
-                console.log(`[AutoSync] Admin ${admin.id}: ${result?.status || 'OK'}`);
-            } catch (err) {
-                console.error(`[AutoSync] Admin ${admin.id} error:`, err.message);
-            }
-        }, intervalMs);
+        console.log(`[AutoSync] Admin ${admin.id} (${admin.email}) → sync every ${intervalMin} phút (plan: ${admin.sync_interval}) [start in ${delay / 1000}s]`);
 
-        adminSyncTimers[admin.id] = { timer, interval: intervalMs };
+        // Stagger start: first sync after delay, then repeat at interval
+        const startTimeout = setTimeout(() => {
+            // First sync
+            (async () => {
+                console.log(`[AutoSync] Syncing Admin ${admin.id} at ${new Date().toLocaleString('vi-VN')}...`);
+                try {
+                    const result = await syncAdmin(admin.id);
+                    console.log(`[AutoSync] Admin ${admin.id}: ${result?.status || 'OK'}`);
+                } catch (err) {
+                    console.error(`[AutoSync] Admin ${admin.id} error:`, err.message);
+                }
+            })();
+
+            // Then repeat at interval
+            const timer = setInterval(async () => {
+                console.log(`[AutoSync] Syncing Admin ${admin.id} at ${new Date().toLocaleString('vi-VN')}...`);
+                try {
+                    const result = await syncAdmin(admin.id);
+                    console.log(`[AutoSync] Admin ${admin.id}: ${result?.status || 'OK'}`);
+                } catch (err) {
+                    console.error(`[AutoSync] Admin ${admin.id} error:`, err.message);
+                }
+            }, intervalMs);
+
+            adminSyncTimers[admin.id] = { timer, interval: intervalMs };
+        }, delay);
+
+        adminSyncTimers[admin.id] = { timer: startTimeout, interval: intervalMs, isStartup: true };
     }
 
     console.log(`[AutoSync] Scheduled ${admins.length} admins`);
