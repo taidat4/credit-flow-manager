@@ -27,8 +27,8 @@ function getSyncStatus(adminId) {
 }
 
 // ========= BROWSER CONCURRENCY CONTROL =========
-const MAX_HEADLESS_BROWSERS = 5;   // headless = ~100MB each
-const MAX_VISIBLE_BROWSERS = 3;    // visible = ~300MB each
+const MAX_HEADLESS_BROWSERS = 3;   // headless = ~150MB each, VPS safe
+const MAX_VISIBLE_BROWSERS = 2;    // visible = ~300MB each
 let activeHeadless = 0;
 let activeVisible = 0;
 const browserQueue = [];
@@ -87,6 +87,13 @@ async function createBrowser(adminId, email, forceVisible = false) {
 
     // Wait for browser slot
     await acquireBrowserSlot(useHeadless);
+
+    // Clean up stale lock files from crashed Chrome sessions
+    const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
+    for (const lf of lockFiles) {
+        const lockPath = path.join(profileDir, lf);
+        try { if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath); } catch { }
+    }
 
     const options = new chrome.Options();
     options.addArguments(`--user-data-dir=${profileDir}`);
