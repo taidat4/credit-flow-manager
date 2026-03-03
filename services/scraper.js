@@ -27,8 +27,8 @@ function getSyncStatus(adminId) {
 }
 
 // ========= BROWSER CONCURRENCY CONTROL =========
-const MAX_HEADLESS_BROWSERS = 3;   // headless = ~150MB each, VPS safe
-const MAX_VISIBLE_BROWSERS = 2;    // visible = ~300MB each
+const MAX_HEADLESS_BROWSERS = 5;   // headless ~150MB each = ~750MB (VPS 8GB)
+const MAX_VISIBLE_BROWSERS = 3;    // visible ~300MB each = ~900MB
 let activeHeadless = 0;
 let activeVisible = 0;
 const browserQueue = [];
