@@ -27,26 +27,27 @@ function getSyncStatus(adminId) {
 }
 
 // ========= BROWSER CONCURRENCY CONTROL =========
-const MAX_HEADLESS_BROWSERS = 5;   // headless ~150MB each = ~750MB (VPS 8GB)
-const MAX_VISIBLE_BROWSERS = 3;    // visible ~300MB each = ~900MB
-let activeHeadless = 0;
+// TOTAL max 7 browsers at any time. Visible sub-limit = 3.
+const MAX_TOTAL_BROWSERS = 7;
+const MAX_VISIBLE_BROWSERS = 3;
+let activeBrowsers = 0;
 let activeVisible = 0;
 const browserQueue = [];
 
 function acquireBrowserSlot(isHeadless) {
     return new Promise((resolve) => {
         const tryAcquire = () => {
-            if (isHeadless && activeHeadless < MAX_HEADLESS_BROWSERS) {
-                activeHeadless++;
-                console.log(`[Browser] Slot acquired (headless: ${activeHeadless}/${MAX_HEADLESS_BROWSERS})`);
-                resolve();
-            } else if (!isHeadless && activeVisible < MAX_VISIBLE_BROWSERS) {
-                activeVisible++;
-                console.log(`[Browser] Slot acquired (visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`);
+            const hasTotal = activeBrowsers < MAX_TOTAL_BROWSERS;
+            const hasVisible = isHeadless || activeVisible < MAX_VISIBLE_BROWSERS;
+
+            if (hasTotal && hasVisible) {
+                activeBrowsers++;
+                if (!isHeadless) activeVisible++;
+                console.log(`[Browser] Slot acquired (total: ${activeBrowsers}/${MAX_TOTAL_BROWSERS}, visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`);
                 resolve();
             } else {
-                console.log(`[Browser] Queue waiting... (headless: ${activeHeadless}/${MAX_HEADLESS_BROWSERS}, visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`);
-                browserQueue.push({ tryAcquire, isHeadless });
+                console.log(`[Browser] Queue waiting... (total: ${activeBrowsers}/${MAX_TOTAL_BROWSERS}, visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`);
+                browserQueue.push({ tryAcquire });
             }
         };
         tryAcquire();
@@ -54,11 +55,11 @@ function acquireBrowserSlot(isHeadless) {
 }
 
 function releaseBrowserSlot(isHeadless) {
-    if (isHeadless) activeHeadless = Math.max(0, activeHeadless - 1);
-    else activeVisible = Math.max(0, activeVisible - 1);
-    console.log(`[Browser] Slot released (headless: ${activeHeadless}/${MAX_HEADLESS_BROWSERS}, visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`);
+    activeBrowsers = Math.max(0, activeBrowsers - 1);
+    if (!isHeadless) activeVisible = Math.max(0, activeVisible - 1);
+    console.log(`[Browser] Slot released (total: ${activeBrowsers}/${MAX_TOTAL_BROWSERS}, visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`);
 
-    // Process queued requests
+    // Process queued requests (FIFO = top-to-bottom order)
     if (browserQueue.length > 0) {
         const next = browserQueue.shift();
         next.tryAcquire();
@@ -67,8 +68,9 @@ function releaseBrowserSlot(isHeadless) {
 
 /**
  * Create Chrome browser — smart headless with concurrency control:
- * - Profile đã login (có session) → headless (nhẹ, nhanh, max 5)
- * - Profile mới/chưa login → hiện browser để login (max 3)
+ * - Profile đã login (có session) → headless
+ * - Profile mới/chưa login → hiện browser để login
+ * - TOTAL max 7 browsers, visible max 3
  */
 async function createBrowser(adminId, email, forceVisible = false) {
     // Use email for profile dir to avoid ID collisions between databases
@@ -450,7 +452,7 @@ async function syncAdmin(adminId) {
     let driver = null;
 
     try {
-        syncStatus[adminId].message = `Chờ slot... (headless: ${activeHeadless}/${MAX_HEADLESS_BROWSERS}, visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`;
+        syncStatus[adminId].message = `Chờ slot... (${activeBrowsers}/${MAX_TOTAL_BROWSERS} browsers, visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`;
         driver = await createBrowser(adminId, admin.email);
         syncStatus[adminId].message = 'Đang đăng nhập Google...';
 
@@ -914,32 +916,31 @@ async function saveData(adminId, creditData, storageData) {
     }
 }
 
-const MAX_CONCURRENT_SYNC = 5; // Run up to 5 browsers at once
-
 async function syncAllAdmins() {
-    const admins = await db.prepare("SELECT id FROM admins WHERE status = 'active' AND google_password IS NOT NULL AND google_password != ''").all();
-    console.log(`[Sync] Starting sync for ${admins.length} admins (max ${MAX_CONCURRENT_SYNC} concurrent)`);
+    const admins = await db.prepare(`
+        SELECT id FROM admins 
+        WHERE status = 'active' AND google_password IS NOT NULL AND google_password != ''
+        ORDER BY created_at DESC
+    `).all();
+    console.log(`[Sync] Starting sync: ${admins.length} admins (max ${MAX_TOTAL_BROWSERS} browsers)`);
 
-    const results = [];
-    // Process in batches of MAX_CONCURRENT_SYNC
-    for (let i = 0; i < admins.length; i += MAX_CONCURRENT_SYNC) {
-        const batch = admins.slice(i, i + MAX_CONCURRENT_SYNC);
-        const batchResults = await Promise.allSettled(
-            batch.map(async (admin) => {
-                try {
-                    const result = await syncAdmin(admin.id);
-                    return { id: admin.id, success: true, data: result };
-                } catch (err) {
-                    return { id: admin.id, success: false, error: err.message };
-                }
-            })
-        );
-        for (const r of batchResults) {
-            results.push(r.status === 'fulfilled' ? r.value : { id: null, success: false, error: r.reason?.message });
-        }
-        console.log(`[Sync] Batch ${Math.floor(i / MAX_CONCURRENT_SYNC) + 1} done (${Math.min(i + MAX_CONCURRENT_SYNC, admins.length)}/${admins.length})`);
-    }
-    return results;
+    let ok = 0, fail = 0;
+    // Fire ALL — semaphore limits to MAX_TOTAL_BROWSERS, FIFO queue preserves order
+    await Promise.allSettled(
+        admins.map(async (admin, i) => {
+            const tag = `[${i + 1}/${admins.length}]`;
+            try {
+                await syncAdmin(admin.id);
+                ok++;
+                console.log(`[Sync] ${tag} Admin ${admin.id}: ✅`);
+            } catch (err) {
+                fail++;
+                console.error(`[Sync] ${tag} Admin ${admin.id}: ❌ ${err.message}`);
+            }
+        })
+    );
+    console.log(`[Sync] All done! ${ok} OK, ${fail} errors / ${admins.length}`);
+    return { ok, fail, total: admins.length };
 }
 
 // ========= SEQUENTIAL ROUND-ROBIN AUTO SYNC =========
@@ -981,45 +982,26 @@ async function runSyncCycle() {
             return;
         }
 
-        const BATCH_SIZE = MAX_HEADLESS_BROWSERS; // 5 browsers per batch
-        const totalBatches = Math.ceil(admins.length / BATCH_SIZE);
-        console.log(`[AutoSync] ▶ Starting cycle: ${admins.length} admins in ${totalBatches} batches of ${BATCH_SIZE}`);
+        console.log(`[AutoSync] ▶ Cycle: ${admins.length} admins (max ${MAX_TOTAL_BROWSERS} browsers)`);
         let ok = 0, fail = 0;
 
-        for (let batch = 0; batch < totalBatches; batch++) {
-            const start = batch * BATCH_SIZE;
-            const end = Math.min(start + BATCH_SIZE, admins.length);
-            const batchAdmins = admins.slice(start, end);
-            const batchNum = batch + 1;
+        // Fire ALL — semaphore limits to 7 browsers max, FIFO preserves order
+        await Promise.allSettled(
+            admins.map(async (admin, i) => {
+                const tag = `[${i + 1}/${admins.length}]`;
+                try {
+                    await syncAdmin(admin.id);
+                    ok++;
+                    console.log(`[AutoSync] ${tag} ✅`);
+                } catch (err) {
+                    fail++;
+                    console.error(`[AutoSync] ${tag} ❌ ${err.message}`);
+                }
+            })
+        );
 
-            console.log(`[AutoSync] === Batch ${batchNum}/${totalBatches} (Admin ${start + 1}-${end}/${admins.length}) ===`);
+        console.log(`[AutoSync] ✅ Cycle done! ${ok} OK, ${fail} errors / ${admins.length}`);
 
-            // Sync all admins in this batch in parallel
-            const results = await Promise.allSettled(
-                batchAdmins.map(async (admin, idx) => {
-                    const tag = `[${start + idx + 1}/${admins.length}]`;
-                    console.log(`[AutoSync] ${tag} Admin ${admin.id} (${admin.email})...`);
-                    try {
-                        await syncAdmin(admin.id);
-                        ok++;
-                        console.log(`[AutoSync] ${tag} ✅ OK`);
-                    } catch (err) {
-                        fail++;
-                        console.error(`[AutoSync] ${tag} ❌ ${err.message}`);
-                    }
-                })
-            );
-
-            // 5s gap between batches
-            if (batch < totalBatches - 1) {
-                console.log(`[AutoSync] Batch ${batchNum} done, next batch in 5s...`);
-                await new Promise(r => setTimeout(r, 5000));
-            }
-        }
-
-        console.log(`[AutoSync] ✅ Cycle done! ${ok} OK, ${fail} errors / ${admins.length} total`);
-
-        // Wait the shortest plan interval before next cycle
         const waitMs = Math.min(...admins.map(a => parseSyncInterval(a.sync_interval)));
         console.log(`[AutoSync] ⏰ Next cycle in ${Math.round(waitMs / 60000)} phút`);
         syncCycleTimer = setTimeout(() => {
