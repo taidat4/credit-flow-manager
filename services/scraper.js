@@ -26,10 +26,49 @@ function getSyncStatus(adminId) {
     return syncStatus[adminId] || { status: 'idle', message: '', last_sync: null };
 }
 
+// ========= BROWSER CONCURRENCY CONTROL =========
+const MAX_HEADLESS_BROWSERS = 5;   // headless = ~100MB each
+const MAX_VISIBLE_BROWSERS = 3;    // visible = ~300MB each
+let activeHeadless = 0;
+let activeVisible = 0;
+const browserQueue = [];
+
+function acquireBrowserSlot(isHeadless) {
+    return new Promise((resolve) => {
+        const tryAcquire = () => {
+            if (isHeadless && activeHeadless < MAX_HEADLESS_BROWSERS) {
+                activeHeadless++;
+                console.log(`[Browser] Slot acquired (headless: ${activeHeadless}/${MAX_HEADLESS_BROWSERS})`);
+                resolve();
+            } else if (!isHeadless && activeVisible < MAX_VISIBLE_BROWSERS) {
+                activeVisible++;
+                console.log(`[Browser] Slot acquired (visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`);
+                resolve();
+            } else {
+                console.log(`[Browser] Queue waiting... (headless: ${activeHeadless}/${MAX_HEADLESS_BROWSERS}, visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`);
+                browserQueue.push({ tryAcquire, isHeadless });
+            }
+        };
+        tryAcquire();
+    });
+}
+
+function releaseBrowserSlot(isHeadless) {
+    if (isHeadless) activeHeadless = Math.max(0, activeHeadless - 1);
+    else activeVisible = Math.max(0, activeVisible - 1);
+    console.log(`[Browser] Slot released (headless: ${activeHeadless}/${MAX_HEADLESS_BROWSERS}, visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`);
+
+    // Process queued requests
+    if (browserQueue.length > 0) {
+        const next = browserQueue.shift();
+        next.tryAcquire();
+    }
+}
+
 /**
- * Create Chrome browser — smart headless:
- * - Profile đã login (có session) → headless (nhẹ, nhanh)
- * - Profile mới/chưa login → hiện browser để login
+ * Create Chrome browser — smart headless with concurrency control:
+ * - Profile đã login (có session) → headless (nhẹ, nhanh, max 5)
+ * - Profile mới/chưa login → hiện browser để login (max 3)
  */
 async function createBrowser(adminId, email, forceVisible = false) {
     // Use email for profile dir to avoid ID collisions between databases
@@ -46,11 +85,19 @@ async function createBrowser(adminId, email, forceVisible = false) {
 
     const useHeadless = hasSession && !forceVisible;
 
+    // Wait for browser slot
+    await acquireBrowserSlot(useHeadless);
+
     const options = new chrome.Options();
     options.addArguments(`--user-data-dir=${profileDir}`);
 
     if (useHeadless) {
         options.addArguments('--headless=new');
+        // Memory-saving flags for headless
+        options.addArguments('--disable-dev-shm-usage');
+        options.addArguments('--no-sandbox');
+        options.addArguments('--disable-software-rasterizer');
+        options.addArguments('--js-flags=--max-old-space-size=128');
         console.log(`[Scraper] 🔒 Headless mode (profile đã login)`);
     } else {
         console.log(`[Scraper] 👁 Visible mode (cần login hoặc force visible)`);
@@ -71,6 +118,9 @@ async function createBrowser(adminId, email, forceVisible = false) {
         .forBrowser('chrome')
         .setChromeOptions(options)
         .build();
+
+    // Tag driver with headless info for slot release
+    driver._isHeadless = useHeadless;
 
     console.log('[Scraper] ✓ Chrome browser created');
     return driver;
@@ -453,6 +503,7 @@ async function syncAdmin(adminId) {
     } finally {
         if (driver) {
             try { await driver.quit(); } catch { }
+            releaseBrowserSlot(driver._isHeadless);
         }
     }
 }
@@ -1142,6 +1193,7 @@ async function addFamilyMember(adminId, memberEmail) {
     } finally {
         if (driver) {
             try { await driver.quit(); } catch { }
+            releaseBrowserSlot(driver._isHeadless);
         }
     }
 }
@@ -1304,6 +1356,7 @@ async function cancelInvitation(adminId, memberEmail) {
     } finally {
         if (driver) {
             try { await driver.quit(); } catch { }
+            releaseBrowserSlot(driver._isHeadless);
         }
     }
 }
@@ -1650,6 +1703,7 @@ async function removeFamilyMember(adminId, memberId) {
     } finally {
         if (driver) {
             try { await driver.quit(); } catch { }
+            releaseBrowserSlot(driver._isHeadless);
         }
     }
 }
