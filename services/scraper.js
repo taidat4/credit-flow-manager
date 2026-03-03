@@ -78,10 +78,10 @@ async function createBrowser(adminId, email, forceVisible = false) {
         fs.mkdirSync(profileDir, { recursive: true });
     }
 
-    // Check if profile has existing login session
-    const hasSession = fs.existsSync(path.join(profileDir, 'Default', 'Cookies'))
-        || fs.existsSync(path.join(profileDir, 'Default', 'Login Data'))
-        || fs.existsSync(path.join(profileDir, 'Default', 'Network', 'Cookies'));
+    // Check if admin has ever synced successfully (DB is source of truth, not file existence)
+    // Chrome creates Cookies/Login Data files on first launch even without login!
+    const adminRecord = await db.prepare('SELECT last_sync FROM admins WHERE id = ?').get(adminId);
+    const hasSession = !!(adminRecord && adminRecord.last_sync);
 
     const useHeadless = hasSession && !forceVisible;
 
