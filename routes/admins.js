@@ -118,10 +118,12 @@ router.get('/', requireAuth, async (req, res) => {
 
     if (admin.credits_remaining_actual > 0) {
       admin.credits_remaining = admin.credits_remaining_actual;
-      admin.credits_used = admin.total_monthly_credits - admin.credits_remaining_actual;
+      admin.credits_used = Math.max(0, admin.total_monthly_credits - admin.credits_remaining_actual);
     } else {
-      admin.credits_used = parseInt(usage.total);
-      admin.credits_remaining = admin.total_monthly_credits - parseInt(usage.total);
+      // Fallback: cap credits_used at total_monthly_credits to prevent negative remaining
+      const rawUsed = parseInt(usage.total) || 0;
+      admin.credits_used = Math.min(rawUsed, admin.total_monthly_credits);
+      admin.credits_remaining = Math.max(0, admin.total_monthly_credits - admin.credits_used);
     }
 
     const storageResult = await db.prepare('SELECT COALESCE(SUM(drive_gb + gmail_gb + photos_gb), 0) as total_gb FROM storage_logs WHERE admin_id = ? AND log_date = (SELECT MAX(log_date) FROM storage_logs WHERE admin_id = ?)').get(admin.id, admin.id);
@@ -165,10 +167,11 @@ router.get('/:id', requireAuth, async (req, res) => {
 
   if (admin.credits_remaining_actual > 0) {
     safeAdmin.credits_remaining = admin.credits_remaining_actual;
-    safeAdmin.credits_used = admin.total_monthly_credits - admin.credits_remaining_actual;
+    safeAdmin.credits_used = Math.max(0, admin.total_monthly_credits - admin.credits_remaining_actual);
   } else {
-    safeAdmin.credits_used = parseInt(usage.total);
-    safeAdmin.credits_remaining = admin.total_monthly_credits - parseInt(usage.total);
+    const rawUsed = parseInt(usage.total) || 0;
+    safeAdmin.credits_used = Math.min(rawUsed, admin.total_monthly_credits);
+    safeAdmin.credits_remaining = Math.max(0, admin.total_monthly_credits - safeAdmin.credits_used);
   }
 
   const storageResult = await db.prepare('SELECT COALESCE(SUM(drive_gb + gmail_gb + photos_gb), 0) as total_gb FROM storage_logs WHERE admin_id = ? AND log_date = (SELECT MAX(log_date) FROM storage_logs WHERE admin_id = ?)').get(admin.id, admin.id);
