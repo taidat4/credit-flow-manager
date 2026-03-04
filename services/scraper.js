@@ -27,8 +27,8 @@ function getSyncStatus(adminId) {
 }
 
 // ========= BROWSER CONCURRENCY CONTROL =========
-// TOTAL max 7 browsers at any time. Visible sub-limit = 3.
-const MAX_TOTAL_BROWSERS = 7;
+// TOTAL max 10 browsers at any time. Visible sub-limit = 3.
+const MAX_TOTAL_BROWSERS = 10;
 const MAX_VISIBLE_BROWSERS = 3;
 let activeBrowsers = 0;
 let activeVisible = 0;
@@ -104,12 +104,26 @@ async function createBrowser(adminId, email, forceVisible = false) {
 
     if (useHeadless) {
         options.addArguments('--headless=new');
-        // Memory-saving flags for headless
+        // Ultra memory-saving flags for headless (~50-60MB per browser)
         options.addArguments('--disable-dev-shm-usage');
         options.addArguments('--no-sandbox');
         options.addArguments('--disable-software-rasterizer');
-        options.addArguments('--js-flags=--max-old-space-size=128');
-        console.log(`[Scraper] 🔒 Headless mode (profile đã login)`);
+        options.addArguments('--js-flags=--max-old-space-size=64');
+        options.addArguments('--disable-images');
+        options.addArguments('--blink-settings=imagesEnabled=false');
+        options.addArguments('--disable-remote-fonts');
+        options.addArguments('--disable-logging');
+        options.addArguments('--log-level=3');
+        options.addArguments('--disable-background-networking');
+        options.addArguments('--disable-default-apps');
+        options.addArguments('--disable-sync');
+        options.addArguments('--disable-translate');
+        options.addArguments('--no-zygote');
+        options.addArguments('--single-process');
+        options.addArguments('--renderer-process-limit=1');
+        options.addArguments('--disable-features=TranslateUI');
+        options.addArguments('--window-size=800,600');
+        console.log(`[Scraper] 🔒 Headless ultra-light mode`);
     } else {
         console.log(`[Scraper] 👁 Visible mode (cần login hoặc force visible)`);
     }
@@ -133,8 +147,25 @@ async function createBrowser(adminId, email, forceVisible = false) {
     // Tag driver with headless info for slot release
     driver._isHeadless = useHeadless;
 
+    // Set page load timeout (30s for headless, 60s for visible)
+    try {
+        await driver.manage().setTimeouts({
+            pageLoad: useHeadless ? 30000 : 60000,
+            script: useHeadless ? 10000 : 30000
+        });
+    } catch { }
+
     console.log('[Scraper] ✓ Chrome browser created');
     return driver;
+}
+
+/**
+ * Smart sleep — headless browsers load faster, no animations to wait for
+ * Cuts wait time by 50% for headless, keeps full time for visible browsers
+ */
+async function smartSleep(driver, ms) {
+    const actual = driver._isHeadless ? Math.round(ms * 0.5) : ms;
+    await driver.sleep(actual);
 }
 
 // ========= AUTO LOGIN (same pattern as MY_BOT GoogleLoginAutomation) =========
@@ -163,7 +194,7 @@ async function waitAndFind(driver, selectors, timeoutMs = 10000) {
                 if (await el.isDisplayed()) return el;
             } catch { }
         }
-        await driver.sleep(500);
+        await smartSleep(driver, 500);
     }
     return null;
 }
@@ -188,9 +219,9 @@ async function safeClick(driver, element) {
 async function safeFill(driver, element, text) {
     const str = text ? String(text) : '';
     await element.click();
-    await driver.sleep(200);
+    await smartSleep(driver, 200);
     await element.clear();
-    await driver.sleep(200);
+    await smartSleep(driver, 200);
     // Send entire text at once — prevents interleaving when multiple browsers run
     await element.sendKeys(str);
 }
@@ -203,7 +234,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
     console.log('[Login] Navigating to Google One credit page (requires auth)...');
     syncStatus[adminId].message = 'Đang mở Google One...';
     await driver.get(CREDIT_URL);
-    await driver.sleep(5000);
+    await smartSleep(driver, 5000);
 
     // Check if already logged in
     let currentUrl = await driver.getCurrentUrl();
@@ -217,7 +248,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
         syncStatus[adminId].message = 'Đang kiểm tra tài khoản...';
         try {
             await driver.get('https://myaccount.google.com/personal-info');
-            await driver.sleep(3000);
+            await smartSleep(driver, 3000);
             const pageText = await driver.findElement(By.css('body')).getText();
             if (pageText.toLowerCase().includes(email.toLowerCase())) {
                 console.log(`[Login] ✓ Correct account: ${email}`);
@@ -226,10 +257,10 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
                 console.log(`[Login] ✗ Wrong account! Expected ${email}, signing out...`);
                 syncStatus[adminId].message = 'Sai tài khoản, đang đăng xuất...';
                 await driver.get('https://accounts.google.com/Logout');
-                await driver.sleep(3000);
+                await smartSleep(driver, 3000);
                 // Navigate back to login
                 await driver.get('https://accounts.google.com/signin/v2/identifier?continue=' + encodeURIComponent(CREDIT_URL) + '&flowName=GlifWebSignIn&flowEntry=ServiceLogin');
-                await driver.sleep(3000);
+                await smartSleep(driver, 3000);
                 currentUrl = await driver.getCurrentUrl();
             }
         } catch (e) {
@@ -241,7 +272,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
     if (currentUrl.includes('/about')) {
         console.log('[Login] Redirected to public page, navigating to accounts.google.com...');
         await driver.get('https://accounts.google.com/signin/v2/identifier?continue=' + encodeURIComponent(CREDIT_URL) + '&flowName=GlifWebSignIn&flowEntry=ServiceLogin');
-        await driver.sleep(3000);
+        await smartSleep(driver, 3000);
         currentUrl = await driver.getCurrentUrl();
         console.log(`[Login] Login page URL: ${currentUrl}`);
     }
@@ -264,7 +295,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
                     "//*[contains(text(), 'Sử dụng một tài khoản khác') or contains(text(), 'Use another account')]"
                 ));
                 await safeClick(driver, useAnother);
-                await driver.sleep(2000);
+                await smartSleep(driver, 2000);
                 emailInput = await waitAndFind(driver, ['input[type="email"]', '#identifierId'], 10000);
             }
         } catch (e) {
@@ -279,7 +310,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
     // Enter email
     console.log('[Login] Typing email...');
     await safeFill(driver, emailInput, email);
-    await driver.sleep(1000);
+    await smartSleep(driver, 1000);
 
     // Click Next (same selectors as MY_BOT)
     const nextBtn = await waitAndFind(driver, ['#identifierNext', '#identifierNext button', 'button[jsname="LgbsSe"]'], 3000);
@@ -289,7 +320,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
         await emailInput.sendKeys(Key.RETURN);
     }
 
-    await driver.sleep(4000);
+    await smartSleep(driver, 4000);
 
     // Check for account deleted/errors
     try {
@@ -313,7 +344,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
 
     console.log('[Login] Typing password...');
     await safeFill(driver, passwordInput, password);
-    await driver.sleep(1000);
+    await smartSleep(driver, 1000);
 
     // Click Next
     const passBtn = await waitAndFind(driver, ['#passwordNext', '#passwordNext button', 'button[jsname="LgbsSe"]'], 3000);
@@ -323,7 +354,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
         await passwordInput.sendKeys(Key.RETURN);
     }
 
-    await driver.sleep(5000);
+    await smartSleep(driver, 5000);
 
     // Check for login errors
     try {
@@ -417,7 +448,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
             if (totpOption) {
                 console.log('[Login] Found TOTP/Authenticator option, clicking...');
                 await safeClick(driver, totpOption);
-                await driver.sleep(3000);
+                await smartSleep(driver, 3000);
             } else {
                 console.log('[Login] No Authenticator option found on selection page');
             }
@@ -436,7 +467,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
             console.log(`[Login] Entering TOTP code: ${code}`);
 
             await safeFill(driver, totpInput, code);
-            await driver.sleep(1000);
+            await smartSleep(driver, 1000);
 
             // Click Next/Verify
             const verifyBtn = await waitAndFind(driver, [
@@ -450,7 +481,7 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
                 await totpInput.sendKeys(Key.RETURN);
             }
 
-            await driver.sleep(5000);
+            await smartSleep(driver, 5000);
 
             // Check if 2FA failed (wrong code)
             try {
@@ -478,14 +509,14 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
     }
 
     // Step 5: Verify login success
-    await driver.sleep(3000);
+    await smartSleep(driver, 3000);
     currentUrl = await driver.getCurrentUrl();
     console.log(`[Login] Final URL: ${currentUrl}`);
 
     // Navigate to Google One if not there
     if (!currentUrl.includes('one.google.com')) {
         await driver.get('https://one.google.com/');
-        await driver.sleep(3000);
+        await smartSleep(driver, 3000);
         currentUrl = await driver.getCurrentUrl();
     }
 
@@ -597,7 +628,7 @@ async function syncAdmin(adminId) {
 async function scrapeCredits(driver) {
     console.log('[Scraper] Navigating to credits page...');
     await driver.get(CREDIT_URL);
-    await driver.sleep(8000);
+    await smartSleep(driver, 8000);
 
     let monthlyCredits = 0, bonusCredits = 0, memberUsage = [];
 
@@ -619,9 +650,9 @@ async function scrapeCredits(driver) {
     try {
         // Scroll down to ensure all family members are loaded
         await driver.executeScript('window.scrollTo(0, document.body.scrollHeight)');
-        await driver.sleep(2000);
+        await smartSleep(driver, 2000);
         await driver.executeScript('window.scrollTo(0, document.body.scrollHeight)');
-        await driver.sleep(2000);
+        await smartSleep(driver, 2000);
 
         const pageText = await driver.findElement(By.css('body')).getText();
         console.log('[Scraper] Credits page text (last 1500):', pageText.substring(Math.max(0, pageText.length - 1500)));
@@ -688,7 +719,7 @@ async function scrapeFamily(driver, adminId, adminEmail) {
     const FAMILY_URL = 'https://myaccount.google.com/family/details?utm_source=g1web&utm_medium=default';
     console.log('[Scraper] Navigating to family page...');
     await driver.get(FAMILY_URL);
-    await driver.sleep(5000);
+    await smartSleep(driver, 5000);
 
     const familyMembers = [];
 
@@ -772,7 +803,7 @@ async function scrapeFamily(driver, adminId, adminEmail) {
         for (const name of memberNames) {
             try {
                 await driver.get(FAMILY_URL);
-                await driver.sleep(3000);
+                await smartSleep(driver, 3000);
                 let clicked = false;
                 try {
                     const el = await driver.findElement(By.xpath(`//*[text()='${name}']`));
@@ -783,7 +814,7 @@ async function scrapeFamily(driver, adminId, adminEmail) {
                     try { const el = await driver.findElement(By.xpath(`//*[contains(text(), '${name}')]`)); await safeClick(driver, el); clicked = true; } catch { }
                 }
                 if (clicked) {
-                    await driver.sleep(3000);
+                    await smartSleep(driver, 3000);
                     const detail = await driver.findElement(By.css('body')).getText();
                     const emails = detail.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g) || [];
                     const email = emails.find(e => e !== adminEmail) || '';
@@ -837,7 +868,7 @@ async function scrapeFamily(driver, adminId, adminEmail) {
 async function scrapeStorage(driver) {
     console.log('[Scraper] Navigating to storage page...');
     await driver.get(STORAGE_URL);
-    await driver.sleep(8000);
+    await smartSleep(driver, 8000);
 
     let totalStorage = '30 TB', totalUsed = '0 GB';
     let driveGB = 0, gmailGB = 0, photosGB = 0;
@@ -846,7 +877,7 @@ async function scrapeStorage(driver) {
     try {
         // Scroll down to family storage section
         await driver.executeScript('window.scrollTo(0, document.body.scrollHeight)');
-        await driver.sleep(2000);
+        await smartSleep(driver, 2000);
 
         // Click ONLY the family storage text to expand (NOT aria-expanded which opens profile!)
         try {
@@ -856,17 +887,17 @@ async function scrapeStorage(driver) {
             for (const el of familyEls) {
                 try {
                     await driver.executeScript('arguments[0].scrollIntoView({block: "center"})', el);
-                    await driver.sleep(500);
+                    await smartSleep(driver, 500);
                     await driver.executeScript('arguments[0].click()', el);
-                    await driver.sleep(1000);
+                    await smartSleep(driver, 1000);
                     // Try direct parent only (the row containing the text + chevron)
                     await driver.executeScript('arguments[0].parentElement.click()', el);
-                    await driver.sleep(1500);
+                    await smartSleep(driver, 1500);
                 } catch { }
             }
         } catch { }
 
-        await driver.sleep(2000);
+        await smartSleep(driver, 2000);
         const pageText = await driver.findElement(By.css('body')).getText();
         console.log('[Scraper] Storage page text (last 1000):', pageText.substring(Math.max(0, pageText.length - 1000)));
 
@@ -1134,7 +1165,7 @@ async function addFamilyMember(adminId, memberEmail) {
         syncStatus[adminId].message = 'Đang mở trang gia đình...';
         console.log(`[AddMember] Navigating directly to family page...`);
         await driver.get(FAMILY_URL);
-        await driver.sleep(5000);
+        await smartSleep(driver, 5000);
 
         let currentUrl = await driver.getCurrentUrl();
 
@@ -1145,7 +1176,7 @@ async function addFamilyMember(adminId, memberEmail) {
             await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
             // After login, go straight to family page
             await driver.get(FAMILY_URL);
-            await driver.sleep(5000);
+            await smartSleep(driver, 5000);
         } else {
             console.log('[AddMember] ✓ Already logged in, on family page');
         }
@@ -1163,12 +1194,12 @@ async function addFamilyMember(adminId, memberEmail) {
 
         if (inviteBtn) {
             await safeClick(driver, inviteBtn);
-            await driver.sleep(3000);
+            await smartSleep(driver, 3000);
         } else {
             // Fallback: navigate directly to invite URL
             console.log('[AddMember] Invite button not found, navigating directly...');
             await driver.get(INVITE_URL);
-            await driver.sleep(3000);
+            await smartSleep(driver, 3000);
         }
 
         // Step 3: Find email input and type member email
@@ -1191,7 +1222,7 @@ async function addFamilyMember(adminId, memberEmail) {
         }
 
         await safeFill(driver, emailInput, memberEmail);
-        await driver.sleep(2000);
+        await smartSleep(driver, 2000);
 
         // Sometimes need to select from autocomplete dropdown
         try {
@@ -1202,7 +1233,7 @@ async function addFamilyMember(adminId, memberEmail) {
             ], 3000);
             if (suggestion) {
                 await safeClick(driver, suggestion);
-                await driver.sleep(1000);
+                await smartSleep(driver, 1000);
             }
         } catch { /* no autocomplete, that's fine */ }
 
@@ -1243,7 +1274,7 @@ async function addFamilyMember(adminId, memberEmail) {
 
         if (!clicked) throw new Error('Không tìm thấy nút Gửi');
 
-        await driver.sleep(5000);
+        await smartSleep(driver, 5000);
 
         // Step 5: Check for success page + click "Tôi hiểu"
         currentUrl = await driver.getCurrentUrl();
@@ -1259,7 +1290,7 @@ async function addFamilyMember(adminId, memberEmail) {
                     "//button[contains(text(), 'Tôi hiểu') or contains(text(), 'Got it') or contains(text(), 'I understand')]"
                 ));
                 await safeClick(driver, understandBtn);
-                await driver.sleep(2000);
+                await smartSleep(driver, 2000);
             } catch {
                 console.log('[AddMember] "Tôi hiểu" button not found, but invitation was sent');
             }
@@ -1309,7 +1340,7 @@ async function cancelInvitation(adminId, memberEmail) {
         syncStatus[adminId].message = 'Đang mở trang gia đình...';
         console.log(`[CancelInvite] Navigating to family page...`);
         await driver.get(FAMILY_URL);
-        await driver.sleep(3000);
+        await smartSleep(driver, 3000);
 
         let currentUrl = await driver.getCurrentUrl();
 
@@ -1319,7 +1350,7 @@ async function cancelInvitation(adminId, memberEmail) {
             syncStatus[adminId].message = 'Đang đăng nhập...';
             await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
             await driver.get(FAMILY_URL);
-            await driver.sleep(3000);
+            await smartSleep(driver, 3000);
         } else {
             console.log('[CancelInvite] ✓ Already logged in');
         }
@@ -1345,7 +1376,7 @@ async function cancelInvitation(adminId, memberEmail) {
             throw new Error(`Không tìm thấy ${memberEmail} trên trang gia đình`);
         }
 
-        await driver.sleep(2000);
+        await smartSleep(driver, 2000);
         console.log(`[CancelInvite] ✓ On member detail page`);
 
         // Step 2: Click "Hủy lời mời" / "Cancel invitation"
@@ -1387,7 +1418,7 @@ async function cancelInvitation(adminId, memberEmail) {
         }
 
         await safeClick(driver, cancelBtn);
-        await driver.sleep(2000);
+        await smartSleep(driver, 2000);
         console.log('[CancelInvite] ✓ Clicked cancel');
 
         // Step 3: Confirm "Có" / "Yes"
@@ -1421,7 +1452,7 @@ async function cancelInvitation(adminId, memberEmail) {
         if (!confirmBtn) throw new Error('Không tìm thấy nút xác nhận');
 
         await safeClick(driver, confirmBtn);
-        await driver.sleep(3000);
+        await smartSleep(driver, 3000);
         console.log('[CancelInvite] ✓ Confirmed');
 
         // Step 4: Check we're back on the family details page (no more pending member)
@@ -1475,7 +1506,7 @@ async function removeFamilyMember(adminId, memberId) {
         syncStatus[adminId].message = 'Đang mở trang gia đình...';
         console.log(`[RemoveMember] Navigating to family page...`);
         await driver.get(FAMILY_URL);
-        await driver.sleep(3000);
+        await smartSleep(driver, 3000);
 
         let currentUrl = await driver.getCurrentUrl();
 
@@ -1485,7 +1516,7 @@ async function removeFamilyMember(adminId, memberId) {
             syncStatus[adminId].message = 'Đang đăng nhập...';
             await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
             await driver.get(FAMILY_URL);
-            await driver.sleep(3000);
+            await smartSleep(driver, 3000);
         } else {
             console.log('[RemoveMember] ✓ Already logged in');
         }
@@ -1517,7 +1548,7 @@ async function removeFamilyMember(adminId, memberId) {
             throw new Error(`Không tìm thấy ${memberName} trên trang gia đình`);
         }
 
-        await driver.sleep(2000);
+        await smartSleep(driver, 2000);
         console.log(`[RemoveMember] ✓ On member detail page`);
 
         // Step 2: Click "Xóa thành viên" / "Remove member"
@@ -1556,7 +1587,7 @@ async function removeFamilyMember(adminId, memberId) {
         }
 
         await safeClick(driver, removeBtn);
-        await driver.sleep(3000);
+        await smartSleep(driver, 3000);
         console.log('[RemoveMember] ✓ Clicked remove button');
 
         // Step 3: Handle verification challenges after clicking remove
@@ -1590,7 +1621,7 @@ async function removeFamilyMember(adminId, memberId) {
                     } catch { }
                 }
                 if (nextBtn) await safeClick(driver, nextBtn);
-                await driver.sleep(3000);
+                await smartSleep(driver, 3000);
                 console.log('[RemoveMember] ✓ Password submitted');
 
                 // Re-read page for next step
@@ -1661,7 +1692,7 @@ async function removeFamilyMember(adminId, memberId) {
                     // Wait for 2FA page to go away (poll up to 15s)
                     console.log('[RemoveMember] Waiting for 2FA to process...');
                     for (let i = 0; i < 8; i++) {
-                        await driver.sleep(2000);
+                        await smartSleep(driver, 2000);
                         currentUrl = await driver.getCurrentUrl();
                         console.log(`[RemoveMember] 2FA poll ${i + 1}: ${currentUrl.substring(0, 80)}`);
                         if (!currentUrl.includes('challenge/totp')) {
@@ -1687,7 +1718,7 @@ async function removeFamilyMember(adminId, memberId) {
         let alreadyOnFamilyPage = false;
 
         for (let i = 0; i < 10; i++) {
-            await driver.sleep(2000);
+            await smartSleep(driver, 2000);
             currentUrl = await driver.getCurrentUrl();
             confirmPageText = await driver.findElement(By.css('body')).getText();
             const lowerText = confirmPageText.toLowerCase();
@@ -1765,7 +1796,7 @@ async function removeFamilyMember(adminId, memberId) {
 
             if (confirmRemoveBtn) {
                 await safeClick(driver, confirmRemoveBtn);
-                await driver.sleep(3000);
+                await smartSleep(driver, 3000);
                 console.log('[RemoveMember] ✓ Clicked Remove — confirmed!');
                 removalConfirmed = true;
             } else {
