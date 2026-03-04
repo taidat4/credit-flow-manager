@@ -1070,6 +1070,16 @@ async function syncAllAdmins() {
             })
         );
         console.log(`[Sync] All done! ${ok} OK, ${fail} errors / ${admins.length}`);
+
+        // Reset auto-sync timer — restart 15min countdown after manual sync
+        if (syncCycleTimer) clearTimeout(syncCycleTimer);
+        const CYCLE_WAIT = 15 * 60 * 1000;
+        nextSyncTime = Date.now() + CYCLE_WAIT;
+        console.log(`[Sync] ⏰ Next auto-sync in 15 phút`);
+        syncCycleTimer = setTimeout(() => {
+            runSyncCycle().catch(e => console.error('[AutoSync] Cycle error:', e.message));
+        }, CYCLE_WAIT);
+
         return { ok, fail, total: admins.length };
     } finally {
         globalSyncRunning = false;
