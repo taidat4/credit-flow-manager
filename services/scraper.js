@@ -118,8 +118,6 @@ async function createBrowser(adminId, email, forceVisible = false) {
         options.addArguments('--disable-default-apps');
         options.addArguments('--disable-sync');
         options.addArguments('--disable-translate');
-        options.addArguments('--no-zygote');
-        options.addArguments('--single-process');
         options.addArguments('--renderer-process-limit=1');
         options.addArguments('--disable-features=TranslateUI');
         options.addArguments('--window-size=800,600');
