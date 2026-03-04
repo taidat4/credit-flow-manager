@@ -624,18 +624,32 @@ async function syncAdmin(adminId) {
 async function scrapeCredits(driver) {
     console.log('[Scraper] Navigating to credits page...');
     await driver.get(CREDIT_URL);
-    await smartSleep(driver, 8000);
+    await driver.sleep(8000); // FULL wait — page must render credit numbers
 
     let monthlyCredits = 0, bonusCredits = 0, memberUsage = [];
 
     try {
-        const els = await driver.findElements(By.css('.wAlWod'));
-        const texts = [];
+        let els = await driver.findElements(By.css('.wAlWod'));
+        let texts = [];
         for (const el of els) {
             const text = await el.getText();
             texts.push(text.trim());
         }
-        console.log(`[Scraper] Credit elements: ${JSON.stringify(texts)}`);
+        console.log(`[Scraper] Credit elements (1st try): ${JSON.stringify(texts)}`);
+
+        // Retry if empty — page may not have loaded fully
+        if (texts.length === 0 || texts.every(t => !t)) {
+            console.log('[Scraper] Credits empty, retrying after 5s...');
+            await driver.sleep(5000);
+            els = await driver.findElements(By.css('.wAlWod'));
+            texts = [];
+            for (const el of els) {
+                const text = await el.getText();
+                texts.push(text.trim());
+            }
+            console.log(`[Scraper] Credit elements (2nd try): ${JSON.stringify(texts)}`);
+        }
+
         if (texts.length > 0) monthlyCredits = parseCreditsNumber(texts[0]);
         if (texts.length > 1) bonusCredits = parseCreditsNumber(texts[1]);
     } catch (err) {
@@ -864,7 +878,7 @@ async function scrapeFamily(driver, adminId, adminEmail) {
 async function scrapeStorage(driver) {
     console.log('[Scraper] Navigating to storage page...');
     await driver.get(STORAGE_URL);
-    await smartSleep(driver, 8000);
+    await driver.sleep(8000); // FULL wait — storage page must render
 
     let totalStorage = '30 TB', totalUsed = '0 GB';
     let driveGB = 0, gmailGB = 0, photosGB = 0;
