@@ -137,6 +137,17 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // GET /api/admins/:id
+// GET /api/admins/next-sync (MUST be before /:id routes)
+router.get('/next-sync', requireAuth, async (req, res) => {
+  try {
+    if (getNextSyncTime) {
+      res.json(getNextSyncTime());
+    } else {
+      res.json({ status: 'unknown', nextSync: null });
+    }
+  } catch (err) { res.json({ status: 'unknown', nextSync: null }); }
+});
+
 router.get('/:id', requireAuth, async (req, res) => {
   const userId = req.session.userId;
   const admin = await db.prepare('SELECT * FROM admins WHERE id = ? AND status != ? AND (user_id = ? OR user_id IS NULL)').get(req.params.id, 'removed', userId);
@@ -270,16 +281,7 @@ router.post('/sync-all', requireAuthOrBridge, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/admins/next-sync
-router.get('/next-sync', requireAuthOrBridge, async (req, res) => {
-  try {
-    if (getNextSyncTime) {
-      res.json(getNextSyncTime());
-    } else {
-      res.json({ status: 'unknown', nextSync: null });
-    }
-  } catch (err) { res.json({ status: 'unknown', nextSync: null }); }
-});
+
 
 // GET /api/admins/:id/sync-status
 router.get('/:id/sync-status', requireAuthOrBridge, async (req, res) => {
