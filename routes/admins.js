@@ -149,7 +149,7 @@ router.get('/', requireAuth, async (req, res) => {
 
 // GET /api/admins/:id
 // GET /api/admins/next-sync (MUST be before /:id routes)
-router.get('/next-sync', requireAuth, async (req, res) => {
+router.get('/next-sync', requireAuthOrBridge, async (req, res) => {
   try {
     if (getNextSyncTime) {
       res.json(await getNextSyncTime());
