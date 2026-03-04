@@ -109,8 +109,6 @@ async function createBrowser(adminId, email, forceVisible = false) {
         options.addArguments('--no-sandbox');
         options.addArguments('--disable-software-rasterizer');
         options.addArguments('--js-flags=--max-old-space-size=64');
-        options.addArguments('--disable-images');
-        options.addArguments('--blink-settings=imagesEnabled=false');
         options.addArguments('--disable-remote-fonts');
         options.addArguments('--disable-logging');
         options.addArguments('--log-level=3');
@@ -965,9 +963,17 @@ async function saveData(adminId, creditData, storageData) {
 
     // ===== CREDITS: Store absolute value from Google =====
     // creditData.monthlyCredits = credits remaining from Google One page
-    // Store this directly on the admin record
-    await db.prepare('UPDATE admins SET credits_remaining_actual = ?, last_sync = ? WHERE id = ?')
-        .run(creditData.monthlyCredits, now, adminId);
+    // Sanity check: value must be between 0 and total_monthly_credits
+    const maxCredits = admin.total_monthly_credits || 25000;
+    if (creditData.monthlyCredits > 0 && creditData.monthlyCredits <= maxCredits) {
+        await db.prepare('UPDATE admins SET credits_remaining_actual = ?, last_sync = ? WHERE id = ?')
+            .run(creditData.monthlyCredits, now, adminId);
+        console.log(`[Scraper] Credits OK: ${creditData.monthlyCredits}/${maxCredits}`);
+    } else {
+        // Don't overwrite — just update last_sync
+        console.log(`[Scraper] ⚠ Credits invalid (${creditData.monthlyCredits}/${maxCredits}) — skipping update`);
+        await db.prepare('UPDATE admins SET last_sync = ? WHERE id = ?').run(now, adminId);
+    }
 
     // For member usage: only log if value changed
     if (creditData.memberUsage.length > 0) {
