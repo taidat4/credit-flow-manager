@@ -90,6 +90,17 @@ try {
       return { status: 'error', message: 'Không kết nối được VPS' };
     }
   };
+
+  getNextSyncTime = async () => {
+    try {
+      const res = await fetch(`${VPS_URL}/api/admins/next-sync`, {
+        headers: { 'X-VPS-Bridge': 'true', 'X-Sync-Key': SYNC_KEY }
+      });
+      return await res.json();
+    } catch (err) {
+      return { status: 'unknown', nextSync: null };
+    }
+  };
 }
 
 // GET /api/admins
@@ -141,7 +152,7 @@ router.get('/', requireAuth, async (req, res) => {
 router.get('/next-sync', requireAuth, async (req, res) => {
   try {
     if (getNextSyncTime) {
-      res.json(getNextSyncTime());
+      res.json(await getNextSyncTime());
     } else {
       res.json({ status: 'unknown', nextSync: null });
     }
