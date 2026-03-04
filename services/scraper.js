@@ -1052,20 +1052,14 @@ async function runSyncCycle() {
 
     try {
         const admins = await db.prepare(`
-            SELECT a.id, a.email, a.user_id,
-                   COALESCE(p.sync_interval, '30 phút') as sync_interval
+            SELECT a.id, a.email
             FROM admins a
-            LEFT JOIN users u ON a.user_id = u.id
-            LEFT JOIN sa_subscriptions s ON s.user_id = u.id AND s.status = 'active' 
-                AND (s.end_date IS NULL OR s.end_date >= CURRENT_DATE)
-            LEFT JOIN sa_plans p ON s.plan_id = p.id
             WHERE a.status = 'active' AND a.google_password IS NOT NULL AND a.google_password != ''
             ORDER BY a.created_at DESC
         `).all();
 
         if (admins.length === 0) {
             console.log('[AutoSync] No admins to sync');
-            syncCycleRunning = false;
             return;
         }
 
@@ -1089,11 +1083,12 @@ async function runSyncCycle() {
 
         console.log(`[AutoSync] ✅ Cycle done! ${ok} OK, ${fail} errors / ${admins.length}`);
 
-        const waitMs = Math.min(...admins.map(a => parseSyncInterval(a.sync_interval)));
-        console.log(`[AutoSync] ⏰ Next cycle in ${Math.round(waitMs / 60000)} phút`);
+        // Fixed 10 minutes wait after last farm finishes
+        const CYCLE_WAIT = 10 * 60 * 1000; // 10 phút
+        console.log(`[AutoSync] ⏰ Next cycle in 10 phút`);
         syncCycleTimer = setTimeout(() => {
             runSyncCycle().catch(e => console.error('[AutoSync] Cycle error:', e.message));
-        }, waitMs);
+        }, CYCLE_WAIT);
 
     } catch (err) {
         console.error('[AutoSync] Cycle error:', err.message);
