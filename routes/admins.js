@@ -7,10 +7,10 @@ const { encrypt, decrypt } = require('../services/crypto');
 
 // Scraper is optional (requires Playwright)
 // If not available, forward sync requests to VPS via API bridge
-let syncAdmin, syncAllAdmins, getSyncStatus, addFamilyMember, cancelInvitation, removeFamilyMember;
+let syncAdmin, syncAllAdmins, getSyncStatus, addFamilyMember, cancelInvitation, removeFamilyMember, getNextSyncTime;
 let useVpsBridge = false;
 try {
-  ({ syncAdmin, syncAllAdmins, getSyncStatus, addFamilyMember, cancelInvitation, removeFamilyMember } = require('../services/scraper'));
+  ({ syncAdmin, syncAllAdmins, getSyncStatus, addFamilyMember, cancelInvitation, removeFamilyMember, getNextSyncTime } = require('../services/scraper'));
 } catch {
   useVpsBridge = true;
   const SYNC_KEY = process.env.SYNC_API_KEY || 'sync-bridge-2026';
@@ -268,6 +268,17 @@ router.post('/sync-all', requireAuthOrBridge, async (req, res) => {
     res.json({ status: 'started', message: 'Đang sync tất cả admins...' });
     syncAllAdmins().catch(err => console.error('[Sync] Error syncing all:', err.message));
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/admins/next-sync
+router.get('/next-sync', requireAuthOrBridge, async (req, res) => {
+  try {
+    if (getNextSyncTime) {
+      res.json(getNextSyncTime());
+    } else {
+      res.json({ status: 'unknown', nextSync: null });
+    }
+  } catch (err) { res.json({ status: 'unknown', nextSync: null }); }
 });
 
 // GET /api/admins/:id/sync-status

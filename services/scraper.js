@@ -1079,6 +1079,7 @@ async function syncAllAdmins() {
 // ========= SEQUENTIAL ROUND-ROBIN AUTO SYNC =========
 // Syncs ALL admins: fire all → semaphore limits to 7 → wait → repeat
 let syncCycleTimer = null;
+let nextSyncTime = null; // Track when next auto-sync will start
 
 function parseSyncInterval(intervalText) {
     if (!intervalText) return 30 * 60 * 1000;
@@ -1132,9 +1133,10 @@ async function runSyncCycle() {
 
         console.log(`[AutoSync] ✅ Cycle done! ${ok} OK, ${fail} errors / ${admins.length}`);
 
-        // Fixed 10 minutes wait after last farm finishes
-        const CYCLE_WAIT = 10 * 60 * 1000; // 10 phút
-        console.log(`[AutoSync] ⏰ Next cycle in 10 phút`);
+        // Fixed 15 minutes wait after last farm finishes
+        const CYCLE_WAIT = 15 * 60 * 1000; // 15 phút
+        nextSyncTime = Date.now() + CYCLE_WAIT;
+        console.log(`[AutoSync] ⏰ Next cycle in 15 phút`);
         syncCycleTimer = setTimeout(() => {
             runSyncCycle().catch(e => console.error('[AutoSync] Cycle error:', e.message));
         }, CYCLE_WAIT);
@@ -1847,4 +1849,9 @@ async function removeFamilyMember(adminId, memberId) {
     }
 }
 
-module.exports = { syncAdmin, syncAllAdmins, getSyncStatus, startAutoSync, addFamilyMember, cancelInvitation, removeFamilyMember };
+function getNextSyncTime() {
+    if (globalSyncRunning) return { status: 'syncing', nextSync: null };
+    return { status: 'waiting', nextSync: nextSyncTime };
+}
+
+module.exports = { syncAdmin, syncAllAdmins, getSyncStatus, startAutoSync, addFamilyMember, cancelInvitation, removeFamilyMember, getNextSyncTime };

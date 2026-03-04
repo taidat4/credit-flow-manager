@@ -23,7 +23,11 @@ const AdminsPage = {
     content.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
         <h3 style="font-size:16px;color:var(--text-secondary)">Quản lý tài khoản Google One Admin</h3>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="sync-countdown" style="font-size:12px;color:var(--text-muted);font-family:monospace;background:rgba(255,255,255,0.05);padding:4px 10px;border-radius:6px;display:flex;align-items:center;gap:5px">
+            <i class="fas fa-clock" style="font-size:10px"></i>
+            <span id="sync-countdown-text">--:--</span>
+          </span>
           <button class="btn btn-success" id="btn-sync-all" title="Đồng bộ tất cả tài khoản farm"><i class="fas fa-sync-alt"></i> Đồng bộ tất cả</button>
           <button class="btn btn-primary" id="btn-add-admin"><i class="fas fa-plus"></i> Thêm Admin</button>
         </div>
@@ -34,6 +38,7 @@ const AdminsPage = {
     document.getElementById('btn-sync-all').addEventListener('click', () => this.syncAll());
     await this.loadAdmins();
     this.startAutoRefresh();
+    this.startCountdownPoll();
   },
 
   clearTotpIntervals() {
@@ -45,6 +50,55 @@ const AdminsPage = {
     Object.values(this.syncPolls).forEach(id => clearInterval(id));
     this.syncPolls = {};
     if (this._refreshInterval) { clearInterval(this._refreshInterval); this._refreshInterval = null; }
+    if (this._countdownInterval) { clearInterval(this._countdownInterval); this._countdownInterval = null; }
+    if (this._countdownPoll) { clearInterval(this._countdownPoll); this._countdownPoll = null; }
+  },
+
+  startCountdownPoll() {
+    let nextSync = null;
+    const updateDisplay = () => {
+      const el = document.getElementById('sync-countdown-text');
+      const container = document.getElementById('sync-countdown');
+      if (!el || !container) return;
+
+      if (nextSync === 'syncing') {
+        el.textContent = 'Đang đồng bộ...';
+        container.style.color = 'var(--success)';
+        container.querySelector('i').className = 'fas fa-sync-alt fa-spin';
+        return;
+      }
+
+      if (!nextSync) {
+        el.textContent = '--:--';
+        container.style.color = 'var(--text-muted)';
+        container.querySelector('i').className = 'fas fa-clock';
+        return;
+      }
+
+      const remaining = Math.max(0, nextSync - Date.now());
+      const mins = Math.floor(remaining / 60000);
+      const secs = Math.floor((remaining % 60000) / 1000);
+      el.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      container.style.color = remaining < 60000 ? 'var(--warning)' : 'var(--text-muted)';
+      container.querySelector('i').className = 'fas fa-clock';
+    };
+
+    // Fetch from API every 10 seconds
+    const fetchNextSync = async () => {
+      try {
+        const data = await App.api('/api/admins/next-sync');
+        if (data.status === 'syncing') {
+          nextSync = 'syncing';
+        } else {
+          nextSync = data.nextSync;
+        }
+      } catch { }
+    };
+
+    fetchNextSync();
+    this._countdownPoll = setInterval(fetchNextSync, 10000);
+    // Update display every second for smooth countdown
+    this._countdownInterval = setInterval(updateDisplay, 1000);
   },
 
   async loadAdmins(silent) {
