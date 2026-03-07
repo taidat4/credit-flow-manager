@@ -291,6 +291,12 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
         console.log(`[Login] Login page URL: ${currentUrl}`);
     }
 
+    // If login needed but browser is headless → abort and retry visible
+    if (driver._isHeadless) {
+        console.log('[Login] ⚠ Login needed but running headless — need visible browser!');
+        throw new Error('NEEDS_VISIBLE_LOGIN');
+    }
+
     console.log('[Login] Login needed, proceeding with auto-login...');
 
     // Step 2: Find email input (same selectors as MY_BOT)
@@ -597,8 +603,35 @@ async function syncAdmin(adminId) {
             }
         }, SYNC_TIMEOUT);
 
-        // Auto login!
-        await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
+        // Auto login — if headless detects login needed, retry with visible
+        try {
+            await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
+        } catch (loginErr) {
+            if (loginErr.message === 'NEEDS_VISIBLE_LOGIN') {
+                console.log(`[Scraper] Admin ${adminId}: session expired, retrying with visible browser...`);
+                try { await driver.quit(); } catch { }
+                releaseBrowserSlot(isHeadless);
+                driver = null;
+
+                // Mark sync_status so next time it starts visible directly
+                try { await db.prepare('UPDATE admins SET sync_status = ? WHERE id = ?').run('error: session expired', adminId); } catch { }
+
+                // Reopen as visible
+                driver = await createBrowser(adminId, admin.email, true);
+                isHeadless = false;
+
+                // Reset watchdog
+                if (watchdog) clearTimeout(watchdog);
+                watchdog = setTimeout(() => {
+                    console.log(`[Scraper] ⏰ Watchdog: admin ${adminId} exceeded ${SYNC_TIMEOUT / 1000}s, killing browser`);
+                    if (driver) { driver.quit().catch(() => { }); driver = null; }
+                }, SYNC_TIMEOUT);
+
+                await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
+            } else {
+                throw loginErr;
+            }
+        }
 
         // Scrape credits
         syncStatus[adminId].message = 'Đang lấy dữ liệu credit...';
