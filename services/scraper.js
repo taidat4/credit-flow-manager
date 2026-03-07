@@ -35,12 +35,24 @@ let activeVisible = 0;
 const browserQueue = [];
 
 function acquireBrowserSlot(isHeadless) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+        const SLOT_TIMEOUT = 2 * 60 * 1000; // 2 minutes max wait for a slot
+        let settled = false;
+        const timer = setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                reject(new Error('Browser slot timeout - all slots busy for 2 minutes'));
+            }
+        }, SLOT_TIMEOUT);
+
         const tryAcquire = () => {
+            if (settled) return;
             const hasTotal = activeBrowsers < MAX_TOTAL_BROWSERS;
             const hasVisible = isHeadless || activeVisible < MAX_VISIBLE_BROWSERS;
 
             if (hasTotal && hasVisible) {
+                settled = true;
+                clearTimeout(timer);
                 activeBrowsers++;
                 if (!isHeadless) activeVisible++;
                 console.log(`[Browser] Slot acquired (total: ${activeBrowsers}/${MAX_TOTAL_BROWSERS}, visible: ${activeVisible}/${MAX_VISIBLE_BROWSERS})`);
@@ -64,6 +76,45 @@ function releaseBrowserSlot(isHeadless) {
         const next = browserQueue.shift();
         next.tryAcquire();
     }
+}
+
+// ========= TIMEOUT & ZOMBIE CLEANUP =========
+const SYNC_TIMEOUT = 3 * 60 * 1000; // 3 minutes max per admin sync
+
+function withTimeout(promise, ms, label) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new Error(`Timeout ${ms / 1000}s: ${label}`));
+        }, ms);
+        promise.then(result => {
+            clearTimeout(timer);
+            resolve(result);
+        }).catch(err => {
+            clearTimeout(timer);
+            reject(err);
+        });
+    });
+}
+
+async function killAllChromeZombies() {
+    const { exec } = require('child_process');
+    return new Promise((resolve) => {
+        // Linux VPS
+        exec('pkill -9 -f "chrome.*headless" 2>/dev/null; pkill -9 -f chromedriver 2>/dev/null', () => {
+            // Also try Windows
+            exec('taskkill /F /IM chrome.exe /T 2>nul & taskkill /F /IM chromedriver.exe /T 2>nul', () => {
+                // Reset slot counters
+                const oldTotal = activeBrowsers;
+                activeBrowsers = 0;
+                activeVisible = 0;
+                browserQueue.length = 0;
+                if (oldTotal > 0) {
+                    console.log(`[Cleanup] Killed zombie chromes, reset slots from ${oldTotal} to 0`);
+                }
+                resolve();
+            });
+        });
+    });
 }
 
 /**
@@ -1048,19 +1099,22 @@ async function syncAllAdmins() {
     }
     globalSyncRunning = true;
     try {
+        // Kill zombie chromes from previous stuck cycle
+        await killAllChromeZombies();
+
         const admins = await db.prepare(`
             SELECT id FROM admins 
             WHERE status = 'active' AND google_password IS NOT NULL AND google_password != ''
             ORDER BY created_at DESC
         `).all();
-        console.log(`[Sync] Starting sync: ${admins.length} admins (max ${MAX_TOTAL_BROWSERS} browsers)`);
+        console.log(`[Sync] Starting sync: ${admins.length} admins (max ${MAX_TOTAL_BROWSERS} browsers, timeout ${SYNC_TIMEOUT / 1000}s)`);
 
         let ok = 0, fail = 0;
         await Promise.allSettled(
             admins.map(async (admin, i) => {
                 const tag = `[${i + 1}/${admins.length}]`;
                 try {
-                    await syncAdmin(admin.id);
+                    await withTimeout(syncAdmin(admin.id), SYNC_TIMEOUT, `admin ${admin.id}`);
                     ok++;
                     console.log(`[Sync] ${tag} Admin ${admin.id}: ✅`);
                 } catch (err) {
@@ -1111,6 +1165,9 @@ async function runSyncCycle() {
     globalSyncRunning = true;
 
     try {
+        // Kill zombie chromes from previous stuck cycle
+        await killAllChromeZombies();
+
         const admins = await db.prepare(`
             SELECT a.id, a.email
             FROM admins a
@@ -1131,7 +1188,7 @@ async function runSyncCycle() {
             admins.map(async (admin, i) => {
                 const tag = `[${i + 1}/${admins.length}]`;
                 try {
-                    await syncAdmin(admin.id);
+                    await withTimeout(syncAdmin(admin.id), SYNC_TIMEOUT, `admin ${admin.id}`);
                     ok++;
                     console.log(`[AutoSync] ${tag} ✅`);
                 } catch (err) {
