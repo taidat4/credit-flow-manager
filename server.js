@@ -1,13 +1,13 @@
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
-const pgSession = require('connect-pg-simple')(session);
 const path = require('path');
 const db = require('./db/database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === 'production';
+const usePg = !!process.env.DATABASE_URL;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -16,13 +16,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Trust proxy for Railway/Render
 if (isProd) app.set('trust proxy', 1);
 
-// Session store using PostgreSQL
-app.use(session({
-    store: new pgSession({
-        pool: db.pool,
-        tableName: 'session',
-        createTableIfMissing: true
-    }),
+// Session config
+const sessionConfig = {
     secret: process.env.SESSION_SECRET || 'credit-flow-default-secret',
     resave: false,
     saveUninitialized: false,
@@ -32,7 +27,15 @@ app.use(session({
         maxAge: 7 * 24 * 60 * 60 * 1000,
         sameSite: 'lax'
     }
-}));
+};
+
+// Use PG session store for production, memory store for local dev
+if (usePg && db.pool) {
+    const pgSession = require('connect-pg-simple')(session);
+    sessionConfig.store = new pgSession({ pool: db.pool, tableName: 'session', createTableIfMissing: true });
+}
+
+app.use(session(sessionConfig));
 
 // API Routes
 app.use('/api/auth', require('./routes/auth'));

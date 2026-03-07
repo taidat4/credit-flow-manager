@@ -23,7 +23,7 @@ router.get('/', requireAuth, async (req, res) => {
   }
   query += ' ORDER BY m.admin_id ASC, m.joined_at ASC';
 
-  const result = await db.pool.query(query, params);
+  const result = await db.query(query, params);
   res.json(result.rows);
 });
 

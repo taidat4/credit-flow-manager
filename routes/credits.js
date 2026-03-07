@@ -76,7 +76,7 @@ router.get('/history', requireAuth, async (req, res) => {
   query += ` ORDER BY cl.log_date DESC, cl.id DESC LIMIT $${paramIdx++}`;
   params.push(parseInt(limit));
 
-  const result = await db.pool.query(query, params);
+  const result = await db.query(query, params);
   res.json(result.rows);
 });
 

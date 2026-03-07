@@ -7,10 +7,10 @@ const { encrypt, decrypt } = require('../services/crypto');
 
 // Scraper is optional (requires Playwright)
 // If not available, forward sync requests to VPS via API bridge
-let syncAdmin, syncAllAdmins, getSyncStatus, addFamilyMember, cancelInvitation, removeFamilyMember, getNextSyncTime;
+let syncAdmin, syncAllAdmins, syncUserAdmins, getSyncStatus, addFamilyMember, cancelInvitation, removeFamilyMember, getNextSyncTime;
 let useVpsBridge = false;
 try {
-  ({ syncAdmin, syncAllAdmins, getSyncStatus, addFamilyMember, cancelInvitation, removeFamilyMember, getNextSyncTime } = require('../services/scraper'));
+  ({ syncAdmin, syncAllAdmins, syncUserAdmins, getSyncStatus, addFamilyMember, cancelInvitation, removeFamilyMember, getNextSyncTime } = require('../services/scraper'));
 } catch {
   useVpsBridge = true;
   const SYNC_KEY = process.env.SYNC_API_KEY || 'sync-bridge-2026';
@@ -29,17 +29,19 @@ try {
     }
   };
 
-  syncAllAdmins = async () => {
+  syncAllAdmins = async (userId) => {
     try {
       const res = await fetch(`${VPS_URL}/api/admins/sync-all`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-VPS-Bridge': 'true', 'X-Sync-Key': SYNC_KEY }
+        headers: { 'Content-Type': 'application/json', 'X-VPS-Bridge': 'true', 'X-Sync-Key': SYNC_KEY },
+        body: JSON.stringify({ userId })
       });
       return await res.json();
     } catch (err) {
       return { status: 'error', message: 'Không kết nối được VPS sync server' };
     }
   };
+  syncUserAdmins = syncAllAdmins; // same bridge for user-scoped sync
 
   getSyncStatus = async (adminId) => {
     try {
@@ -284,11 +286,15 @@ router.post('/:id/sync', requireAuthOrBridge, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/admins/sync-all
+// POST /api/admins/sync-all — sync only THIS user's farms
 router.post('/sync-all', requireAuthOrBridge, async (req, res) => {
   try {
-    res.json({ status: 'started', message: 'Đang sync tất cả admins...' });
-    syncAllAdmins().catch(err => console.error('[Sync] Error syncing all:', err.message));
+    const userId = req.body?.userId || req.session?.userId;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    res.json({ status: 'started', message: `Đang sync farms của user ${userId}...` });
+    syncUserAdmins(userId).catch(err => console.error(`[Sync] Error syncing user ${userId}:`, err.message));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

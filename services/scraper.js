@@ -78,44 +78,8 @@ function releaseBrowserSlot(isHeadless) {
     }
 }
 
-// ========= TIMEOUT & ZOMBIE CLEANUP =========
+// ========= SYNC TIMEOUT =========
 const SYNC_TIMEOUT = 3 * 60 * 1000; // 3 minutes max per admin sync
-
-function withTimeout(promise, ms, label) {
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-            reject(new Error(`Timeout ${ms / 1000}s: ${label}`));
-        }, ms);
-        promise.then(result => {
-            clearTimeout(timer);
-            resolve(result);
-        }).catch(err => {
-            clearTimeout(timer);
-            reject(err);
-        });
-    });
-}
-
-async function killAllChromeZombies() {
-    const { exec } = require('child_process');
-    return new Promise((resolve) => {
-        // Linux VPS
-        exec('pkill -9 -f "chrome.*headless" 2>/dev/null; pkill -9 -f chromedriver 2>/dev/null', () => {
-            // Also try Windows
-            exec('taskkill /F /IM chrome.exe /T 2>nul & taskkill /F /IM chromedriver.exe /T 2>nul', () => {
-                // Reset slot counters
-                const oldTotal = activeBrowsers;
-                activeBrowsers = 0;
-                activeVisible = 0;
-                browserQueue.length = 0;
-                if (oldTotal > 0) {
-                    console.log(`[Cleanup] Killed zombie chromes, reset slots from ${oldTotal} to 0`);
-                }
-                resolve();
-            });
-        });
-    });
-}
 
 /**
  * Create Chrome browser — smart headless with concurrency control:
@@ -131,14 +95,17 @@ async function createBrowser(adminId, email, forceVisible = false) {
         fs.mkdirSync(profileDir, { recursive: true });
     }
 
-    // Check if admin has session — either last_sync in DB OR cookies in profile
-    const adminRecord = await db.prepare('SELECT last_sync FROM admins WHERE id = ?').get(adminId);
-    const hasDbSync = !!(adminRecord && adminRecord.last_sync);
+    // Check if admin has VALID session — need cookies + last sync was successful
+    const adminRecord = await db.prepare('SELECT last_sync, sync_status FROM admins WHERE id = ?').get(adminId);
     const hasCookies = fs.existsSync(path.join(profileDir, 'Default', 'Cookies'))
         || fs.existsSync(path.join(profileDir, 'Cookies'));
-    const hasSession = hasDbSync || hasCookies;
+    const lastSyncOk = !!(adminRecord && adminRecord.sync_status === 'success');
+    const hasValidSession = hasCookies && lastSyncOk;
 
-    const useHeadless = hasSession && !forceVisible;
+    const useHeadless = hasValidSession && !forceVisible;
+    if (!useHeadless) {
+        console.log(`[Scraper] Farm ${adminId}: visible mode (cookies=${hasCookies}, lastSyncOk=${lastSyncOk}, force=${forceVisible})`);
+    }
 
     // Wait for browser slot
     await acquireBrowserSlot(useHeadless);
@@ -1116,27 +1083,28 @@ async function saveData(adminId, creditData, storageData) {
 // Global sync mutex — prevents syncAllAdmins + runSyncCycle from running simultaneously
 let globalSyncRunning = false;
 
-async function syncAllAdmins() {
+// Sync only farms belonging to a specific user
+async function syncUserAdmins(userId) {
     if (globalSyncRunning) {
         console.log('[Sync] ⏸ Another sync is already running, skipping');
         return { ok: 0, fail: 0, total: 0, skipped: true };
     }
     globalSyncRunning = true;
     try {
-
         const admins = await db.prepare(`
             SELECT id FROM admins 
             WHERE status = 'active' AND google_password IS NOT NULL AND google_password != ''
+            AND user_id = ?
             ORDER BY created_at DESC
-        `).all();
-        console.log(`[Sync] Starting sync: ${admins.length} admins (max ${MAX_TOTAL_BROWSERS} browsers, timeout ${SYNC_TIMEOUT / 1000}s)`);
+        `).all(userId);
+        console.log(`[Sync] User ${userId}: syncing ${admins.length} farms (max ${MAX_TOTAL_BROWSERS} browsers)`);
 
         let ok = 0, fail = 0;
         await Promise.allSettled(
             admins.map(async (admin, i) => {
                 const tag = `[${i + 1}/${admins.length}]`;
                 try {
-                    await withTimeout(syncAdmin(admin.id), SYNC_TIMEOUT, `admin ${admin.id}`);
+                    await syncAdmin(admin.id);
                     ok++;
                     console.log(`[Sync] ${tag} Admin ${admin.id}: ✅`);
                 } catch (err) {
@@ -1145,9 +1113,56 @@ async function syncAllAdmins() {
                 }
             })
         );
-        console.log(`[Sync] All done! ${ok} OK, ${fail} errors / ${admins.length}`);
+        console.log(`[Sync] User ${userId} done! ${ok} OK, ${fail} errors / ${admins.length}`);
+        return { ok, fail, total: admins.length };
+    } finally {
+        globalSyncRunning = false;
+    }
+}
 
-        // Reset auto-sync timer — restart 15min countdown after manual sync
+// Legacy: sync ALL admins (used by auto-sync cycle only)
+async function syncAllAdmins() {
+    if (globalSyncRunning) {
+        console.log('[Sync] ⏸ Another sync is already running, skipping');
+        return { ok: 0, fail: 0, total: 0, skipped: true };
+    }
+    globalSyncRunning = true;
+    try {
+        const admins = await db.prepare(`
+            SELECT id, last_sync FROM admins 
+            WHERE status = 'active' AND google_password IS NOT NULL AND google_password != ''
+            ORDER BY created_at DESC
+        `).all();
+
+        // Skip farms synced < 10 minutes ago
+        const SKIP_THRESHOLD = 10 * 60 * 1000;
+        const toSync = admins.filter(a => {
+            if (a.last_sync && (Date.now() - new Date(a.last_sync).getTime()) < SKIP_THRESHOLD) {
+                console.log(`[Sync] Skip admin ${a.id} — synced ${Math.round((Date.now() - new Date(a.last_sync).getTime()) / 60000)}m ago`);
+                return false;
+            }
+            return true;
+        });
+
+        console.log(`[Sync] Server sync: ${toSync.length}/${admins.length} farms (skipped ${admins.length - toSync.length} recently synced)`);
+
+        let ok = 0, fail = 0;
+        await Promise.allSettled(
+            toSync.map(async (admin, i) => {
+                const tag = `[${i + 1}/${toSync.length}]`;
+                try {
+                    await syncAdmin(admin.id);
+                    ok++;
+                    console.log(`[Sync] ${tag} Admin ${admin.id}: ✅`);
+                } catch (err) {
+                    fail++;
+                    console.error(`[Sync] ${tag} Admin ${admin.id}: ❌ ${err.message}`);
+                }
+            })
+        );
+        console.log(`[Sync] All done! ${ok} OK, ${fail} errors / ${toSync.length}`);
+
+        // Next cycle in 15 minutes
         if (syncCycleTimer) clearTimeout(syncCycleTimer);
         const CYCLE_WAIT = 15 * 60 * 1000;
         nextSyncTime = Date.now() + CYCLE_WAIT;
@@ -1156,7 +1171,7 @@ async function syncAllAdmins() {
             runSyncCycle().catch(e => console.error('[AutoSync] Cycle error:', e.message));
         }, CYCLE_WAIT);
 
-        return { ok, fail, total: admins.length };
+        return { ok, fail, total: toSync.length };
     } finally {
         globalSyncRunning = false;
     }
@@ -1189,7 +1204,7 @@ async function runSyncCycle() {
     try {
 
         const admins = await db.prepare(`
-            SELECT a.id, a.email
+            SELECT a.id, a.email, a.last_sync
             FROM admins a
             WHERE a.status = 'active' AND a.google_password IS NOT NULL AND a.google_password != ''
             ORDER BY a.created_at DESC
@@ -1200,15 +1215,24 @@ async function runSyncCycle() {
             return;
         }
 
-        console.log(`[AutoSync] ▶ Cycle: ${admins.length} admins (max ${MAX_TOTAL_BROWSERS} browsers)`);
+        // Skip farms synced < 10 minutes ago
+        const SKIP_THRESHOLD = 10 * 60 * 1000;
+        const toSync = admins.filter(a => {
+            if (a.last_sync && (Date.now() - new Date(a.last_sync).getTime()) < SKIP_THRESHOLD) {
+                console.log(`[AutoSync] Skip admin ${a.id} — synced ${Math.round((Date.now() - new Date(a.last_sync).getTime()) / 60000)}m ago`);
+                return false;
+            }
+            return true;
+        });
+
+        console.log(`[AutoSync] ▶ Cycle: ${toSync.length}/${admins.length} farms (skipped ${admins.length - toSync.length})`);
         let ok = 0, fail = 0;
 
-        // Fire ALL — semaphore limits to 7 browsers max, FIFO preserves order
         await Promise.allSettled(
-            admins.map(async (admin, i) => {
-                const tag = `[${i + 1}/${admins.length}]`;
+            toSync.map(async (admin, i) => {
+                const tag = `[${i + 1}/${toSync.length}]`;
                 try {
-                    await withTimeout(syncAdmin(admin.id), SYNC_TIMEOUT, `admin ${admin.id}`);
+                    await syncAdmin(admin.id);
                     ok++;
                     console.log(`[AutoSync] ${tag} ✅`);
                 } catch (err) {
@@ -1218,7 +1242,7 @@ async function runSyncCycle() {
             })
         );
 
-        console.log(`[AutoSync] ✅ Cycle done! ${ok} OK, ${fail} errors / ${admins.length}`);
+        console.log(`[AutoSync] ✅ Cycle done! ${ok} OK, ${fail} errors / ${toSync.length}`);
 
         // Fixed 15 minutes wait after last farm finishes
         const CYCLE_WAIT = 15 * 60 * 1000; // 15 phút
@@ -1942,4 +1966,4 @@ function getNextSyncTime() {
     return { status: 'waiting', nextSync: nextSyncTime };
 }
 
-module.exports = { syncAdmin, syncAllAdmins, getSyncStatus, startAutoSync, addFamilyMember, cancelInvitation, removeFamilyMember, getNextSyncTime };
+module.exports = { syncAdmin, syncAllAdmins, syncUserAdmins, getSyncStatus, startAutoSync, addFamilyMember, cancelInvitation, removeFamilyMember, getNextSyncTime };

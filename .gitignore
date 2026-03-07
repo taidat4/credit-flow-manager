@@ -3,6 +3,10 @@ node_modules/
 
 # Database files
 *.db
+data/
+
+# Browser profiles (Chrome sessions — must stay local)
+browser_data/
 
 # Environment
 .env
