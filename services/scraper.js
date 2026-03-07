@@ -1217,11 +1217,12 @@ function startAutoSync() {
         return;
     }
     if (syncCycleTimer) clearTimeout(syncCycleTimer);
-    console.log('[AutoSync] ▶ Sequential round-robin mode started');
-    // Start first cycle after 10s (let server boot)
-    setTimeout(() => {
+    const FIRST_WAIT = 15 * 60 * 1000; // 15 phút sau khi server start
+    nextSyncTime = Date.now() + FIRST_WAIT;
+    console.log('[AutoSync] ▶ First sync in 15 phút');
+    syncCycleTimer = setTimeout(() => {
         runSyncCycle().catch(e => console.error('[AutoSync] First cycle error:', e.message));
-    }, 10000);
+    }, FIRST_WAIT);
 }
 
 // ========= ADD FAMILY MEMBER =========
