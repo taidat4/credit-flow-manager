@@ -613,10 +613,22 @@ async function syncAdmin(adminId) {
 
     syncStatus[adminId] = { status: 'syncing', message: 'Đang chờ...', last_sync: null };
     let driver = null;
+    let isHeadless = true;
+    let watchdog = null;
 
     try {
         driver = await createBrowser(adminId, admin.email);
+        isHeadless = driver._isHeadless;
         syncStatus[adminId].message = 'Đang mở Google One...';
+
+        // Watchdog: force-kill browser if sync takes > 3 minutes
+        watchdog = setTimeout(() => {
+            console.log(`[Scraper] ⏰ Watchdog: admin ${adminId} exceeded ${SYNC_TIMEOUT / 1000}s, killing browser`);
+            if (driver) {
+                driver.quit().catch(() => { });
+                driver = null;
+            }
+        }, SYNC_TIMEOUT);
 
         // Auto login!
         await googleLogin(driver, admin.email, googlePassword, admin.totp_secret, adminId);
@@ -669,15 +681,16 @@ async function syncAdmin(adminId) {
 
     } catch (err) {
         console.error(`[Scraper] Error syncing admin ${adminId}:`, err.message);
-        await db.prepare('UPDATE admins SET sync_status = ? WHERE id = ?').run('error: ' + err.message, adminId);
+        try { await db.prepare('UPDATE admins SET sync_status = ? WHERE id = ?').run('error: ' + err.message, adminId); } catch { }
         syncStatus[adminId] = { status: 'error', message: err.message, last_sync: null };
         throw err;
 
     } finally {
+        if (watchdog) clearTimeout(watchdog);
         if (driver) {
             try { await driver.quit(); } catch { }
-            releaseBrowserSlot(driver._isHeadless);
         }
+        releaseBrowserSlot(isHeadless);
     }
 }
 
