@@ -32,10 +32,15 @@ const AdminsPage = {
           <button class="btn btn-primary" id="btn-add-admin"><i class="fas fa-plus"></i> Thêm Admin</button>
         </div>
       </div>
+      <div style="margin-bottom:16px;position:relative">
+        <input type="text" id="farm-search" placeholder="🔍 Tìm kiếm email admin hoặc thành viên..." style="width:100%;padding:10px 14px 10px 38px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:var(--text-primary);font-size:14px;outline:none;transition:border-color 0.2s">
+        <i class="fas fa-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:14px"></i>
+      </div>
       <div id="admin-list"><div class="empty-state"><p>Đang tải...</p></div></div>
     `;
     document.getElementById('btn-add-admin').addEventListener('click', () => this.showAddModal());
     document.getElementById('btn-sync-all').addEventListener('click', () => this.syncAll());
+    document.getElementById('farm-search').addEventListener('input', (e) => this.handleSearch(e.target.value));
     await this.loadAdmins();
     this.startAutoRefresh();
     this.startCountdownPoll();
@@ -175,7 +180,10 @@ const AdminsPage = {
           <span class="badge badge--${a.status === 'active' ? 'active' : 'inactive'}" style="font-size:10px">${a.status === 'active' ? '● Hoạt động' : '● Tắt'}</span>
         </div>
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding-right:100px">
-          <div style="width:44px;height:44px;min-width:44px;border-radius:12px;background:${a.avatar_color};display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:white">${a.name.charAt(0)}</div>
+          <div style="position:relative;width:48px;height:48px;min-width:48px">
+            ${a.plan_status === 'active' ? `<svg viewBox="0 0 48 48" width="48" height="48" style="position:absolute;top:0;left:0;pointer-events:none"><circle cx="24" cy="24" r="22" fill="none" stroke-width="3" stroke-dasharray="34.56 34.56" stroke-dashoffset="0" stroke="#E92D18"/><circle cx="24" cy="24" r="22" fill="none" stroke-width="3" stroke-dasharray="34.56 34.56" stroke-dashoffset="-34.56" stroke="#F6AD01"/><circle cx="24" cy="24" r="22" fill="none" stroke-width="3" stroke-dasharray="34.56 34.56" stroke-dashoffset="-69.12" stroke="#249A41"/><circle cx="24" cy="24" r="22" fill="none" stroke-width="3" stroke-dasharray="34.56 34.56" stroke-dashoffset="-103.68" stroke="#3174F1"/></svg>` : ''}
+            <div style="width:40px;height:40px;border-radius:50%;background:${a.avatar_color};display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:white;position:absolute;top:4px;left:4px">${a.name.charAt(0)}</div>
+          </div>
           <div style="overflow:hidden">
             <div style="font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.name}</div>
             <div style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.email}</div>
@@ -208,6 +216,69 @@ const AdminsPage = {
         <div id="sync-status-${a.id}" style="margin-top:4px"></div>
       </div>
     `).join('')}</div>`;
+  },
+
+  // ========= SEARCH =========
+  async handleSearch(query) {
+    query = query.trim().toLowerCase();
+    const cards = document.querySelectorAll('#admin-list .card');
+
+    if (!query) {
+      cards.forEach(c => { c.style.display = ''; c.style.opacity = '1'; c.style.border = ''; });
+      return;
+    }
+
+    // Check admin emails first
+    let foundAdminId = null;
+    for (const a of this.admins) {
+      if (a.email.toLowerCase().includes(query)) {
+        foundAdminId = a.id;
+        break;
+      }
+    }
+
+    // If not found, search member emails
+    if (!foundAdminId) {
+      for (const a of this.admins) {
+        try {
+          const members = await App.api(`/api/members?admin_id=${a.id}`);
+          for (const m of members) {
+            if (m.email && m.email.toLowerCase().includes(query)) {
+              foundAdminId = a.id;
+              break;
+            }
+          }
+          if (foundAdminId) break;
+        } catch { }
+      }
+    }
+
+    // Highlight matching, dim others
+    cards.forEach((card, i) => {
+      const admin = this.admins[i];
+      if (!admin) return;
+      if (foundAdminId && admin.id === foundAdminId) {
+        card.style.display = '';
+        card.style.opacity = '1';
+        card.style.border = '2px solid var(--primary)';
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else if (admin.email.toLowerCase().includes(query)) {
+        card.style.display = '';
+        card.style.opacity = '1';
+        card.style.border = '';
+      } else {
+        card.style.opacity = '0.3';
+        card.style.border = '';
+      }
+    });
+
+    // Auto-open detail if match found (debounced)
+    if (foundAdminId && query.length > 5) {
+      clearTimeout(this._searchTimeout);
+      this._searchTimeout = setTimeout(() => {
+        this.showDetail(foundAdminId);
+      }, 800);
+    }
   },
 
   // ========= SYNC ==========

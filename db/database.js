@@ -247,8 +247,7 @@ async function initDatabase() {
       'ALTER TABLE sa_subscriptions ADD COLUMN IF NOT EXISTS duration_days INTEGER DEFAULT 30',
       "UPDATE sa_subscriptions SET start_date = started_at::date WHERE start_date IS NULL AND started_at IS NOT NULL",
       "UPDATE sa_subscriptions SET end_date = expires_at::date WHERE end_date IS NULL AND expires_at IS NOT NULL",
-      "ALTER TABLE admins ADD COLUMN IF NOT EXISTS plan_name TEXT DEFAULT ''",
-      "ALTER TABLE admins ADD COLUMN IF NOT EXISTS plan_expiry TEXT DEFAULT ''",
+      "ALTER TABLE admins ADD COLUMN IF NOT EXISTS plan_status TEXT DEFAULT 'unknown'",
     ];
     for (const sql of migrations) { try { await pool.query(sql); } catch { } }
     console.log('[DB] Migrations applied');
@@ -269,7 +268,8 @@ async function initDatabase() {
         credit_reset_day INTEGER NOT NULL DEFAULT 27, avatar_color TEXT DEFAULT '#6366f1',
         status TEXT NOT NULL DEFAULT 'active', google_password TEXT DEFAULT '',
         last_sync TEXT, sync_status TEXT DEFAULT '', notes TEXT DEFAULT '',
-        credits_remaining_actual INTEGER DEFAULT 0, user_id INTEGER REFERENCES users(id),
+        credits_remaining_actual INTEGER DEFAULT 0, plan_status TEXT DEFAULT 'unknown',
+        user_id INTEGER REFERENCES users(id),
         created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
       );
       CREATE TABLE IF NOT EXISTS members (
