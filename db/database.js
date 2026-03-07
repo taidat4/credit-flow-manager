@@ -247,6 +247,8 @@ async function initDatabase() {
       'ALTER TABLE sa_subscriptions ADD COLUMN IF NOT EXISTS duration_days INTEGER DEFAULT 30',
       "UPDATE sa_subscriptions SET start_date = started_at::date WHERE start_date IS NULL AND started_at IS NOT NULL",
       "UPDATE sa_subscriptions SET end_date = expires_at::date WHERE end_date IS NULL AND expires_at IS NOT NULL",
+      "ALTER TABLE admins ADD COLUMN IF NOT EXISTS plan_name TEXT DEFAULT ''",
+      "ALTER TABLE admins ADD COLUMN IF NOT EXISTS plan_expiry TEXT DEFAULT ''",
     ];
     for (const sql of migrations) { try { await pool.query(sql); } catch { } }
     console.log('[DB] Migrations applied');

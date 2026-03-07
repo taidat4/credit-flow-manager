@@ -633,7 +633,35 @@ async function syncAdmin(adminId) {
             }
         }
 
-        // Scrape credits
+        // CHECK SUBSCRIPTION FIRST — before any data scraping
+        syncStatus[adminId].message = 'Đang kiểm tra gói đăng ký...';
+        let planInfo;
+        try {
+            planInfo = await checkSubscription(driver);
+        } catch (e) {
+            console.error('[Scraper] Plan check error:', e.message);
+            planInfo = { hasSubscription: null, planName: 'Lỗi kiểm tra', expiryDate: null };
+        }
+
+        // Save plan info to DB
+        try {
+            await db.prepare('UPDATE admins SET plan_name = ?, plan_expiry = ? WHERE id = ?')
+                .run(planInfo.planName || '', planInfo.expiryDate || '', adminId);
+        } catch (e) {
+            console.error('[Scraper] Plan save error:', e.message);
+        }
+
+        if (planInfo.hasSubscription === false) {
+            console.log(`[Scraper] ⚠ Admin ${adminId}: ${planInfo.planName} — skipping further scraping`);
+            syncStatus[adminId] = {
+                status: 'warning',
+                message: `⚠ ${planInfo.planName} — tài khoản không có gói đăng ký!`,
+                last_sync: new Date().toISOString()
+            };
+            await db.prepare('UPDATE admins SET last_sync = ?, sync_status = ? WHERE id = ?')
+                .run(new Date().toISOString(), 'warning: ' + planInfo.planName, adminId);
+            return { planInfo, credits: null, storage: null };
+        }
         syncStatus[adminId].message = 'Đang lấy dữ liệu credit...';
         let creditData;
         try {
@@ -691,6 +719,84 @@ async function syncAdmin(adminId) {
             try { await driver.quit(); } catch { }
         }
         releaseBrowserSlot(isHeadless);
+    }
+}
+
+// ========= SUBSCRIPTION CHECK =========
+const PLANS_URL = 'https://one.google.com/about/plans?hl=vi-VN&g1_landing_page=0';
+
+async function checkSubscription(driver) {
+    console.log('[Scraper] Checking subscription plan...');
+    try {
+        await driver.get(PLANS_URL);
+        await driver.sleep(5000);
+
+        const pageSource = await driver.getPageSource();
+
+        // Method 1: Check for current plan text
+        // "Gói hiện tại" = has active plan, extract plan name
+        if (pageSource.includes('Gói hiện tại') || pageSource.includes('Current plan')) {
+            // Try to extract plan name like "Google AI Ultra"
+            const planName = await driver.executeScript(`
+                const els = document.querySelectorAll('*');
+                for (const el of els) {
+                    const t = (el.textContent || '').trim();
+                    if (t.includes('Google AI') || t.includes('Google One')) {
+                        // Find the specific plan name element
+                        if (t.length < 50 && (t.includes('Ultra') || t.includes('Premium') || t.includes('Basic') || t.includes('Plus') || t.includes('AI'))) {
+                            return t;
+                        }
+                    }
+                }
+                return null;
+            `);
+
+            // Try to extract expiry date
+            const expiryDate = await driver.executeScript(`
+                const text = document.body.innerText;
+                const match = text.match(/kết thúc vào (.+?)(?:\\n|$)/i)
+                    || text.match(/ends? (?:on )?(.+?)(?:\\n|$)/i)
+                    || text.match(/gia hạn vào (.+?)(?:\\n|$)/i);
+                return match ? match[1].trim() : null;
+            `);
+
+            console.log(`[Scraper] ✅ Active plan: ${planName || 'Unknown'}, expires: ${expiryDate || 'N/A'}`);
+            return { hasSubscription: true, planName: planName || 'Google One', expiryDate };
+        }
+
+        // Method 2: Check if page shows pricing/trial offers (= no plan)
+        if (pageSource.includes('Dùng thử') || pageSource.includes('Bắt đầu') || pageSource.includes('Start trial')) {
+            console.log('[Scraper] ❌ No active plan — showing trial/pricing page');
+            return { hasSubscription: false, planName: 'Mất gói', expiryDate: null };
+        }
+
+        // Method 3: Check for multicolor ring SVG (4-color Google One ring)
+        const hasRing = await driver.executeScript(`
+            const svgs = document.querySelectorAll('svg');
+            for (const svg of svgs) {
+                const paths = svg.querySelectorAll('path');
+                if (paths.length >= 4) {
+                    const fills = Array.from(paths).map(p => p.getAttribute('fill'));
+                    // Google One ring has yellow (#F6AD01), green (#249A41), blue (#3174F1), red (#E92D18)
+                    if (fills.includes('#F6AD01') || fills.includes('#249A41') || fills.includes('#3174F1') || fills.includes('#E92D18')) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        `);
+
+        if (hasRing) {
+            console.log('[Scraper] ✅ Google One ring detected — has active plan');
+            return { hasSubscription: true, planName: 'Google One', expiryDate: null };
+        }
+
+        console.log('[Scraper] ⚠ Cannot determine plan status');
+        return { hasSubscription: false, planName: 'Không xác định', expiryDate: null };
+
+    } catch (err) {
+        console.error('[Scraper] Subscription check error:', err.message);
+        return { hasSubscription: null, planName: 'Lỗi kiểm tra', expiryDate: null };
     }
 }
 
