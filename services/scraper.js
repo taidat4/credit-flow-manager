@@ -700,42 +700,50 @@ async function syncAdmin(adminId) {
 }
 
 // ========= PLAN STATUS CHECK =========
-const PLANS_URL = 'https://one.google.com/about/plans?hl=vi-VN&g1_landing_page=0';
+// Check Google One HOME page for plan status
+const GOOGLE_ONE_HOME = 'https://one.google.com/home?g1_landing_page=0&hl=vi-VN';
 
 async function checkPlanStatus(driver, adminId) {
     console.log(`[PlanCheck] Admin ${adminId}: Starting plan check...`);
     syncStatus[adminId].message = 'Đang kiểm tra gói đăng ký...';
 
     try {
-        await driver.get(PLANS_URL);
-        await driver.sleep(8000); // Wait longer for full page load
+        // Go to Google One HOME page (more reliable than plans page)
+        await driver.get(GOOGLE_ONE_HOME);
+        await driver.sleep(8000);
 
-        // Get visible text (not HTML) for more reliable matching
-        const bodyText = await driver.executeScript('return document.body.innerText');
+        const bodyText = await driver.executeScript('return document.body.innerText') || '';
         const pageUrl = await driver.getCurrentUrl();
 
-        // Debug: log what we see
         console.log(`[PlanCheck] Admin ${adminId}: URL = ${pageUrl}`);
-        console.log(`[PlanCheck] Admin ${adminId}: Page text (first 500 chars) = ${(bodyText || '').substring(0, 500)}`);
+        console.log(`[PlanCheck] Admin ${adminId}: Body text (500 chars) = ${bodyText.substring(0, 500)}`);
 
-        // ONLY ONE CHECK: "Gói hiện tại" = HAS active plan
-        // This text ONLY appears when user has an active subscription
-        const hasCurrentPlan = (bodyText || '').includes('Gói hiện tại') || (bodyText || '').includes('Current plan');
+        // Check 1: Storage amount — "30 TB" or "2 TB" = has paid plan, "15 GB" only = free/no plan
+        const has30TB = bodyText.includes('30 TB');
+        const has2TB = bodyText.includes('2 TB');
+        const has100GB = bodyText.includes('100 GB') && bodyText.includes('Gói hiện tại');
+        const has200GB = bodyText.includes('200 GB') && bodyText.includes('Gói hiện tại');
+        const has15GBonly = bodyText.includes('15 GB') && !has30TB && !has2TB;
 
-        if (hasCurrentPlan) {
-            console.log(`[PlanCheck] Admin ${adminId}: ✅ ACTIVE — found "Gói hiện tại"`);
+        // Check 2: "Gói hiện tại" text — only shows for active plans
+        const hasCurrentPlan = bodyText.includes('Gói hiện tại') || bodyText.includes('Current plan');
+
+        console.log(`[PlanCheck] Admin ${adminId}: 30TB=${has30TB}, 2TB=${has2TB}, 15GBonly=${has15GBonly}, currentPlan=${hasCurrentPlan}`);
+
+        // ACTIVE: has large storage OR "Gói hiện tại" text
+        if (has30TB || has2TB || has100GB || has200GB || hasCurrentPlan) {
+            console.log(`[PlanCheck] Admin ${adminId}: ✅ ACTIVE`);
             await db.prepare('UPDATE admins SET plan_status = ? WHERE id = ?').run('active', adminId);
             return 'active';
         }
 
-        // Not found = NO plan (expired/never had)
-        console.log(`[PlanCheck] Admin ${adminId}: ❌ EXPIRED — "Gói hiện tại" NOT found`);
+        // EXPIRED: only 15GB or no plan indicator found
+        console.log(`[PlanCheck] Admin ${adminId}: ❌ EXPIRED — no paid plan detected`);
         await db.prepare('UPDATE admins SET plan_status = ? WHERE id = ?').run('expired', adminId);
         return 'expired';
 
     } catch (err) {
         console.error(`[PlanCheck] Admin ${adminId}: ERROR — ${err.message}`);
-        // On error, mark expired (safe default — no ring)
         try { await db.prepare('UPDATE admins SET plan_status = ? WHERE id = ?').run('expired', adminId); } catch { }
         return 'expired';
     }
