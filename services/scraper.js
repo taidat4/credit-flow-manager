@@ -151,10 +151,27 @@ async function createBrowser(adminId, email, forceVisible = false) {
 
     console.log(`[Scraper] Creating Chrome browser for admin ${adminId}...`);
 
-    const driver = await new Builder()
-        .forBrowser('chrome')
-        .setChromeOptions(options)
-        .build();
+    let driver;
+    try {
+        driver = await new Builder()
+            .forBrowser('chrome')
+            .setChromeOptions(options)
+            .build();
+    } catch (buildErr) {
+        // Auto-retry: if "session not created" (corrupt profile), delete profile and retry
+        if (buildErr.message && buildErr.message.includes('session not created')) {
+            console.log(`[Scraper] ⚠ Session error for admin ${adminId}, deleting profile and retrying...`);
+            try { fs.rmSync(profileDir, { recursive: true, force: true }); } catch { }
+            fs.mkdirSync(profileDir, { recursive: true });
+            driver = await new Builder()
+                .forBrowser('chrome')
+                .setChromeOptions(options)
+                .build();
+            console.log(`[Scraper] ✓ Retry successful for admin ${adminId}`);
+        } else {
+            throw buildErr;
+        }
+    }
 
     // Tag driver with headless info for slot release
     driver._isHeadless = useHeadless;
