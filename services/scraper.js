@@ -703,51 +703,41 @@ async function syncAdmin(adminId) {
 const PLANS_URL = 'https://one.google.com/about/plans?hl=vi-VN&g1_landing_page=0';
 
 async function checkPlanStatus(driver, adminId) {
-    console.log('[Scraper] Checking plan status...');
+    console.log(`[PlanCheck] Admin ${adminId}: Starting plan check...`);
     syncStatus[adminId].message = 'Đang kiểm tra gói đăng ký...';
 
     try {
         await driver.get(PLANS_URL);
-        await driver.sleep(5000);
+        await driver.sleep(8000); // Wait longer for full page load
 
-        const pageSource = await driver.getPageSource();
+        // Get visible text (not HTML) for more reliable matching
+        const bodyText = await driver.executeScript('return document.body.innerText');
+        const pageUrl = await driver.getCurrentUrl();
 
-        // RELIABLE indicators — "Gói hiện tại" ONLY shows when user HAS a plan
-        const hasCurrentPlan = pageSource.includes('Gói hiện tại') || pageSource.includes('Current plan');
-        // "kết thúc vào ngày" = plan expiry date — only shows for active plans
-        const hasExpiry = pageSource.includes('kết thúc vào') || pageSource.includes('ends on');
-        // "Gia hạn" (Renew) button — only for active plans
-        const hasRenewBtn = pageSource.includes('>Gia hạn<') || pageSource.includes('>Renew<');
+        // Debug: log what we see
+        console.log(`[PlanCheck] Admin ${adminId}: URL = ${pageUrl}`);
+        console.log(`[PlanCheck] Admin ${adminId}: Page text (first 500 chars) = ${(bodyText || '').substring(0, 500)}`);
 
-        if (hasCurrentPlan || hasExpiry || hasRenewBtn) {
-            console.log(`[Scraper] Admin ${adminId}: ✅ Plan ACTIVE (currentPlan=${hasCurrentPlan}, expiry=${hasExpiry}, renew=${hasRenewBtn})`);
+        // ONLY ONE CHECK: "Gói hiện tại" = HAS active plan
+        // This text ONLY appears when user has an active subscription
+        const hasCurrentPlan = (bodyText || '').includes('Gói hiện tại') || (bodyText || '').includes('Current plan');
+
+        if (hasCurrentPlan) {
+            console.log(`[PlanCheck] Admin ${adminId}: ✅ ACTIVE — found "Gói hiện tại"`);
             await db.prepare('UPDATE admins SET plan_status = ? WHERE id = ?').run('active', adminId);
             return 'active';
         }
 
-        // NO PLAN indicators — "Dùng thử" (Try) page = no active subscription
-        const hasTryPage = pageSource.includes('Dùng thử Google One') || pageSource.includes('Try Google One');
-        // "Bắt đầu" (Start) buttons = signup page, not active plan
-        const hasStartBtn = pageSource.includes('>Bắt đầu<') || pageSource.includes('>Start<');
-        // "Chọn một gói" with no "Gói hiện tại" = selecting a NEW plan
-        const hasSelectPlan = pageSource.includes('Chọn một gói') || pageSource.includes('Choose a plan');
-        // Only 15GB storage = free tier, no plan
-        const hasFreeStorage = pageSource.includes('15 GB') && !hasCurrentPlan;
-
-        if (hasTryPage || hasStartBtn || (hasSelectPlan && !hasCurrentPlan) || hasFreeStorage) {
-            console.log(`[Scraper] Admin ${adminId}: ❌ Plan EXPIRED (try=${hasTryPage}, startBtn=${hasStartBtn}, select=${hasSelectPlan}, free15GB=${hasFreeStorage})`);
-            await db.prepare('UPDATE admins SET plan_status = ? WHERE id = ?').run('expired', adminId);
-            return 'expired';
-        }
-
-        // Fallback — default to expired if we can't confirm active
-        console.log(`[Scraper] Admin ${adminId}: ❓ Cannot confirm active plan, marking expired`);
+        // Not found = NO plan (expired/never had)
+        console.log(`[PlanCheck] Admin ${adminId}: ❌ EXPIRED — "Gói hiện tại" NOT found`);
         await db.prepare('UPDATE admins SET plan_status = ? WHERE id = ?').run('expired', adminId);
         return 'expired';
 
     } catch (err) {
-        console.error(`[Scraper] Plan check error for admin ${adminId}:`, err.message);
-        return 'unknown';
+        console.error(`[PlanCheck] Admin ${adminId}: ERROR — ${err.message}`);
+        // On error, mark expired (safe default — no ring)
+        try { await db.prepare('UPDATE admins SET plan_status = ? WHERE id = ?').run('expired', adminId); } catch { }
+        return 'expired';
     }
 }
 
