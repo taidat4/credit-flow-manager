@@ -712,34 +712,38 @@ async function checkPlanStatus(driver, adminId) {
 
         const pageSource = await driver.getPageSource();
 
-        // Check for active plan indicators
-        const hasUltra = pageSource.includes('Google AI Ultra') || pageSource.includes('AI Ultra');
-        const hasPlanActive = pageSource.includes('Gói hiện tại') || pageSource.includes('Current plan');
-        const hasRenew = pageSource.includes('Gia hạn') || pageSource.includes('Renew');
-        // Check for the colorful ring SVG (4-color Google ring)
-        const hasRing = pageSource.includes('#F6AD01') && pageSource.includes('#249A41') && pageSource.includes('#3174F1') && pageSource.includes('#E92D18');
+        // RELIABLE indicators — "Gói hiện tại" ONLY shows when user HAS a plan
+        const hasCurrentPlan = pageSource.includes('Gói hiện tại') || pageSource.includes('Current plan');
+        // "kết thúc vào ngày" = plan expiry date — only shows for active plans
+        const hasExpiry = pageSource.includes('kết thúc vào') || pageSource.includes('ends on');
+        // "Gia hạn" (Renew) button — only for active plans
+        const hasRenewBtn = pageSource.includes('>Gia hạn<') || pageSource.includes('>Renew<');
 
-        if (hasUltra || hasPlanActive || hasRenew || hasRing) {
-            console.log(`[Scraper] Admin ${adminId}: ✅ Plan ACTIVE (ultra=${hasUltra}, current=${hasPlanActive}, ring=${hasRing})`);
+        if (hasCurrentPlan || hasExpiry || hasRenewBtn) {
+            console.log(`[Scraper] Admin ${adminId}: ✅ Plan ACTIVE (currentPlan=${hasCurrentPlan}, expiry=${hasExpiry}, renew=${hasRenewBtn})`);
             await db.prepare('UPDATE admins SET plan_status = ? WHERE id = ?').run('active', adminId);
             return 'active';
         }
 
-        // Check for expired/no plan indicators
-        const hasTrialOffer = pageSource.includes('Dùng thử') || pageSource.includes('Try it');
-        const hasPricingOnly = pageSource.includes('US$/tháng') || pageSource.includes('đ/tháng') || pageSource.includes('/month');
-        const noPlanText = pageSource.includes('Gói của bạn đã bị mất') || pageSource.includes('Your plan has been lost');
+        // NO PLAN indicators — "Dùng thử" (Try) page = no active subscription
+        const hasTryPage = pageSource.includes('Dùng thử Google One') || pageSource.includes('Try Google One');
+        // "Bắt đầu" (Start) buttons = signup page, not active plan
+        const hasStartBtn = pageSource.includes('>Bắt đầu<') || pageSource.includes('>Start<');
+        // "Chọn một gói" with no "Gói hiện tại" = selecting a NEW plan
+        const hasSelectPlan = pageSource.includes('Chọn một gói') || pageSource.includes('Choose a plan');
+        // Only 15GB storage = free tier, no plan
+        const hasFreeStorage = pageSource.includes('15 GB') && !hasCurrentPlan;
 
-        if (noPlanText || (hasPricingOnly && !hasPlanActive)) {
-            console.log(`[Scraper] Admin ${adminId}: ❌ Plan EXPIRED`);
+        if (hasTryPage || hasStartBtn || (hasSelectPlan && !hasCurrentPlan) || hasFreeStorage) {
+            console.log(`[Scraper] Admin ${adminId}: ❌ Plan EXPIRED (try=${hasTryPage}, startBtn=${hasStartBtn}, select=${hasSelectPlan}, free15GB=${hasFreeStorage})`);
             await db.prepare('UPDATE admins SET plan_status = ? WHERE id = ?').run('expired', adminId);
             return 'expired';
         }
 
-        // Unknown — couldn't determine
-        console.log(`[Scraper] Admin ${adminId}: ❓ Plan status unclear, marking as unknown`);
-        await db.prepare('UPDATE admins SET plan_status = ? WHERE id = ?').run('unknown', adminId);
-        return 'unknown';
+        // Fallback — default to expired if we can't confirm active
+        console.log(`[Scraper] Admin ${adminId}: ❓ Cannot confirm active plan, marking expired`);
+        await db.prepare('UPDATE admins SET plan_status = ? WHERE id = ?').run('expired', adminId);
+        return 'expired';
 
     } catch (err) {
         console.error(`[Scraper] Plan check error for admin ${adminId}:`, err.message);
