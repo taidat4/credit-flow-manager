@@ -138,7 +138,7 @@ async function createBrowser(adminId, email, forceVisible = false) {
         || fs.existsSync(path.join(profileDir, 'Cookies'));
     const hasSession = hasDbSync || hasCookies;
 
-    const useHeadless = false; // TEMP: force visible for debugging — revert later
+    const useHeadless = hasSession && !forceVisible;
 
     // Wait for browser slot
     await acquireBrowserSlot(useHeadless);
