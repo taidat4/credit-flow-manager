@@ -1099,8 +1099,6 @@ async function syncAllAdmins() {
     }
     globalSyncRunning = true;
     try {
-        // Kill zombie chromes from previous stuck cycle
-        await killAllChromeZombies();
 
         const admins = await db.prepare(`
             SELECT id FROM admins 
@@ -1165,8 +1163,6 @@ async function runSyncCycle() {
     globalSyncRunning = true;
 
     try {
-        // Kill zombie chromes from previous stuck cycle
-        await killAllChromeZombies();
 
         const admins = await db.prepare(`
             SELECT a.id, a.email
