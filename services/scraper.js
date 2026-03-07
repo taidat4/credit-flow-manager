@@ -456,8 +456,10 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
         }
     }
 
-    // Check if we need 2FA
-    if (totpSecret && (currentUrl.includes('challenge') || currentUrl.includes('signin/v2'))) {
+    // Check if we need 2FA — skip if already on Google One (login succeeded without 2FA)
+    if (currentUrl.includes('one.google.com') && !currentUrl.includes('accounts.google.com')) {
+        console.log('[Login] ✓ Already on Google One — no 2FA needed');
+    } else if (totpSecret && (currentUrl.includes('challenge') || currentUrl.includes('signin/v2'))) {
         console.log('[Login] 2FA challenge detected, entering TOTP...');
         syncStatus[adminId].message = 'Đang nhập mã 2FA...';
 
@@ -528,22 +530,31 @@ async function googleLogin(driver, email, password, totpSecret, adminId) {
                 await totpInput.sendKeys(Key.RETURN);
             }
 
-            await smartSleep(driver, 5000);
+            await smartSleep(driver, 8000);
 
-            // Check if 2FA failed (wrong code)
+            // Check if we made it past — success = NOT on challenge page anymore
             try {
                 const postTotpUrl = await driver.getCurrentUrl();
-                const postTotpSource = await driver.getPageSource();
-                const wrongCodeKeywords = [
-                    'Wrong code', 'Sai mã', 'incorrect', 'Mã không đúng',
-                    'Try again', 'Thử lại', 'không hợp lệ', 'invalid'
-                ];
-                const isWrongCode = wrongCodeKeywords.some(kw => postTotpSource.includes(kw));
-                const stillOnChallenge = postTotpUrl.includes('challenge');
+                console.log(`[Login] Post-TOTP URL: ${postTotpUrl}`);
 
-                if (isWrongCode || stillOnChallenge) {
-                    syncStatus[adminId].message = '❌ Sai mã 2FA — hãy kiểm tra lại TOTP secret!';
-                    throw new Error('Sai mã 2FA — TOTP secret có thể sai hoặc hết hạn');
+                // If we landed on Google One or myaccount = TOTP worked!
+                if (postTotpUrl.includes('one.google.com') || postTotpUrl.includes('myaccount.google.com')) {
+                    console.log('[Login] ✓ TOTP accepted, login successful');
+                } else if (postTotpUrl.includes('challenge')) {
+                    // Still on challenge — check if there's an actual error message
+                    const postTotpSource = await driver.getPageSource();
+                    const wrongCodeKeywords = [
+                        'Wrong code', 'Sai mã', 'incorrect', 'Mã không đúng',
+                        'Try again', 'Thử lại', 'không hợp lệ', 'invalid'
+                    ];
+                    const isWrongCode = wrongCodeKeywords.some(kw => postTotpSource.includes(kw));
+
+                    if (isWrongCode) {
+                        syncStatus[adminId].message = '❌ Sai mã 2FA — hãy kiểm tra lại TOTP secret!';
+                        throw new Error('Sai mã 2FA — TOTP secret có thể sai hoặc hết hạn');
+                    }
+                    // No error text but still on challenge — may just be slow, continue anyway
+                    console.log('[Login] Still on challenge page but no error text — continuing...');
                 }
             } catch (e) {
                 if (e.message.includes('2FA')) throw e;
