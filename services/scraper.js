@@ -95,16 +95,14 @@ async function createBrowser(adminId, email, forceVisible = false) {
         fs.mkdirSync(profileDir, { recursive: true });
     }
 
-    // Check if admin has VALID session — need cookies + last sync was successful
+    // Check if admin has VALID session — last sync was successful = can try headless
+    // If session actually expired, NEEDS_VISIBLE_LOGIN retry will handle it
     const adminRecord = await db.prepare('SELECT last_sync, sync_status FROM admins WHERE id = ?').get(adminId);
-    const hasCookies = fs.existsSync(path.join(profileDir, 'Default', 'Cookies'))
-        || fs.existsSync(path.join(profileDir, 'Cookies'));
     const lastSyncOk = !!(adminRecord && adminRecord.sync_status === 'success');
-    const hasValidSession = hasCookies && lastSyncOk;
 
-    const useHeadless = hasValidSession && !forceVisible;
+    const useHeadless = lastSyncOk && !forceVisible;
     if (!useHeadless) {
-        console.log(`[Scraper] Farm ${adminId}: visible mode (cookies=${hasCookies}, lastSyncOk=${lastSyncOk}, force=${forceVisible})`);
+        console.log(`[Scraper] Farm ${adminId}: visible mode (lastSyncOk=${lastSyncOk}, force=${forceVisible})`);
     }
 
     // Wait for browser slot

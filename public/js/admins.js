@@ -32,15 +32,19 @@ const AdminsPage = {
           <button class="btn btn-primary" id="btn-add-admin"><i class="fas fa-plus"></i> Thêm Admin</button>
         </div>
       </div>
-      <div style="margin-bottom:16px;position:relative">
-        <input type="text" id="farm-search" placeholder="🔍 Tìm kiếm email admin hoặc thành viên..." style="width:100%;padding:10px 14px 10px 38px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:var(--text-primary);font-size:14px;outline:none;transition:border-color 0.2s">
-        <i class="fas fa-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:14px"></i>
+      <div style="margin-bottom:16px;display:flex;gap:8px;align-items:center">
+        <div style="position:relative;max-width:320px;flex:1">
+          <input type="text" id="farm-search" placeholder="Nhập email tìm kiếm..." style="width:100%;padding:8px 12px 8px 32px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:var(--text-primary);font-size:13px;outline:none">
+          <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:12px"></i>
+        </div>
+        <button class="btn" id="btn-search" style="padding:8px 14px;font-size:13px;background:var(--primary);border:none;border-radius:8px;color:white;cursor:pointer;display:flex;align-items:center;gap:5px"><i class="fas fa-search"></i> Tìm</button>
       </div>
       <div id="admin-list"><div class="empty-state"><p>Đang tải...</p></div></div>
     `;
     document.getElementById('btn-add-admin').addEventListener('click', () => this.showAddModal());
     document.getElementById('btn-sync-all').addEventListener('click', () => this.syncAll());
-    document.getElementById('farm-search').addEventListener('input', (e) => this.handleSearch(e.target.value));
+    document.getElementById('btn-search').addEventListener('click', () => this.handleSearch(document.getElementById('farm-search').value));
+    document.getElementById('farm-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') this.handleSearch(e.target.value); });
     await this.loadAdmins();
     this.startAutoRefresh();
     this.startCountdownPoll();
@@ -180,9 +184,9 @@ const AdminsPage = {
           <span class="badge badge--${a.status === 'active' ? 'active' : 'inactive'}" style="font-size:10px">${a.status === 'active' ? '● Hoạt động' : '● Tắt'}</span>
         </div>
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding-right:100px">
-          <div style="position:relative;width:48px;height:48px;min-width:48px">
-            ${a.plan_status === 'active' ? `<svg viewBox="0 0 48 48" width="48" height="48" style="position:absolute;top:0;left:0;pointer-events:none"><circle cx="24" cy="24" r="22" fill="none" stroke-width="3" stroke-dasharray="34.56 34.56" stroke-dashoffset="0" stroke="#E92D18"/><circle cx="24" cy="24" r="22" fill="none" stroke-width="3" stroke-dasharray="34.56 34.56" stroke-dashoffset="-34.56" stroke="#F6AD01"/><circle cx="24" cy="24" r="22" fill="none" stroke-width="3" stroke-dasharray="34.56 34.56" stroke-dashoffset="-69.12" stroke="#249A41"/><circle cx="24" cy="24" r="22" fill="none" stroke-width="3" stroke-dasharray="34.56 34.56" stroke-dashoffset="-103.68" stroke="#3174F1"/></svg>` : ''}
-            <div style="width:40px;height:40px;border-radius:50%;background:${a.avatar_color};display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:white;position:absolute;top:4px;left:4px">${a.name.charAt(0)}</div>
+          <div style="position:relative;width:52px;height:52px;min-width:52px">
+            ${a.plan_status === 'active' ? `<svg viewBox="0 0 52 52" width="52" height="52" style="position:absolute;top:0;left:0;pointer-events:none;filter:drop-shadow(0 0 4px rgba(49,116,241,0.5)) drop-shadow(0 0 2px rgba(36,154,65,0.4))"><circle cx="26" cy="26" r="23.5" fill="none" stroke-width="3.5" stroke-dasharray="36.91 36.91" stroke-dashoffset="0" stroke="#FF4444"/><circle cx="26" cy="26" r="23.5" fill="none" stroke-width="3.5" stroke-dasharray="36.91 36.91" stroke-dashoffset="-36.91" stroke="#FFB800"/><circle cx="26" cy="26" r="23.5" fill="none" stroke-width="3.5" stroke-dasharray="36.91 36.91" stroke-dashoffset="-73.82" stroke="#00C853"/><circle cx="26" cy="26" r="23.5" fill="none" stroke-width="3.5" stroke-dasharray="36.91 36.91" stroke-dashoffset="-110.73" stroke="#448AFF"/></svg>` : ''}
+            <div style="width:40px;height:40px;border-radius:50%;background:${a.avatar_color};display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:white;position:absolute;top:6px;left:6px">${a.name.charAt(0)}</div>
           </div>
           <div style="overflow:hidden">
             <div style="font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.name}</div>
