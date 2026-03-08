@@ -19,6 +19,69 @@ const STORAGE_URL = 'https://one.google.com/storage?hl=vi&utm_source=google-acco
 // Persistent Chrome profiles
 const BROWSER_DATA_DIR = path.join(__dirname, '..', 'browser_data');
 
+// ========= AUTO CLEANUP — remove heavy cache data, keep cookies/session =========
+const CLEANUP_DIRS = [
+    'Cache', 'Code Cache', 'GPUCache', 'Service Worker',
+    'blob_storage', 'File System', 'IndexedDB', 'databases',
+    'GCM Store', 'BudgetDatabase', 'coupon_db', 'Download Service',
+    'Feature Engagement Tracker', 'optimization_guide_model_metadata',
+    'optimization_guide_prediction_model_downloads', 'Safe Browsing',
+    'Segmentation Platform', 'shared_proto_db', 'Site Characteristics Database',
+    'Crash Reports', 'DawnCache', 'DawnGraphiteCache', 'GraphiteDawnCache',
+    'commerce_subscription_db', 'component_crx_cache', 'CertificateRevocation',
+];
+// Files to delete (heavy but not needed for login)
+const CLEANUP_FILES = [
+    'Visited Links', 'History', 'History-journal', 'Favicons', 'Favicons-journal',
+    'Top Sites', 'Top Sites-journal', 'Network Action Predictor', 'QuotaManager',
+    'QuotaManager-journal', 'heavy_ad_intervention_opt_out.db',
+];
+
+function cleanBrowserProfile(email) {
+    const safeEmail = (email || '').replace(/[^a-zA-Z0-9]/g, '_');
+    const profileDir = path.join(BROWSER_DATA_DIR, `profile_${safeEmail}`);
+    const defaultDir = path.join(profileDir, 'Default');
+    if (!fs.existsSync(profileDir)) return;
+
+    let freedBytes = 0;
+
+    const getDirSize = (dir) => {
+        let size = 0;
+        try {
+            const items = fs.readdirSync(dir, { withFileTypes: true });
+            for (const item of items) {
+                const fp = path.join(dir, item.name);
+                if (item.isDirectory()) size += getDirSize(fp);
+                else try { size += fs.statSync(fp).size; } catch { }
+            }
+        } catch { }
+        return size;
+    };
+
+    // Clean from both profile root and Default subfolder
+    for (const baseDir of [profileDir, defaultDir]) {
+        if (!fs.existsSync(baseDir)) continue;
+        for (const name of CLEANUP_DIRS) {
+            const target = path.join(baseDir, name);
+            if (fs.existsSync(target)) {
+                const size = getDirSize(target);
+                try { fs.rmSync(target, { recursive: true, force: true }); freedBytes += size; } catch { }
+            }
+        }
+        for (const name of CLEANUP_FILES) {
+            const target = path.join(baseDir, name);
+            if (fs.existsSync(target)) {
+                try { const s = fs.statSync(target).size; fs.unlinkSync(target); freedBytes += s; } catch { }
+            }
+        }
+    }
+
+    if (freedBytes > 0) {
+        const mb = (freedBytes / 1024 / 1024).toFixed(1);
+        console.log(`[Cleanup] ${safeEmail}: freed ${mb} MB`);
+    }
+}
+
 // Track active sync status
 const syncStatus = {};
 
@@ -712,6 +775,8 @@ async function syncAdmin(adminId) {
         if (driver) {
             try { await driver.quit(); } catch { }
         }
+        // Auto-clean heavy browser data (keep cookies/session)
+        try { cleanBrowserProfile(admin.email || `admin_${adminId}`); } catch { }
         releaseBrowserSlot(isHeadless);
     }
 }
