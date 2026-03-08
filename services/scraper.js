@@ -16,9 +16,8 @@ const { decrypt } = require('./crypto');
 const CREDIT_URL = 'https://one.google.com/ai/activity?pli=1&g1_landing_page=0';
 const STORAGE_URL = 'https://one.google.com/storage?hl=vi&utm_source=google-account&utm_medium=web&g1_landing_page=2';
 
-// Persistent Chrome profiles — use H: drive if available to save C: space
-const BROWSER_DATA_DIR = process.env.BROWSER_DATA_PATH
-    || (fs.existsSync('H:\\My Drive\\credit-flow-manager') ? 'H:\\My Drive\\credit-flow-manager' : path.join(__dirname, '..', 'browser_data'));
+// Persistent Chrome profiles (local disk for speed)
+const BROWSER_DATA_DIR = path.join(__dirname, '..', 'browser_data');
 
 // ========= AUTO CLEANUP — remove heavy cache data, keep cookies/session =========
 const CLEANUP_DIRS = [
