@@ -247,7 +247,28 @@ router.put('/:id', requireAuth, async (req, res) => {
 // DELETE /api/admins/:id
 router.delete('/:id', requireAuth, async (req, res) => {
   const userId = req.session.userId;
+  // Get admin email before deleting (for profile cleanup)
+  const admin = await db.prepare('SELECT email FROM admins WHERE id = ? AND (user_id = ? OR user_id IS NULL)').get(req.params.id, userId);
+
   await db.prepare("UPDATE admins SET status = 'removed', updated_at = NOW() WHERE id = ? AND (user_id = ? OR user_id IS NULL)").run(req.params.id, userId);
+
+  // Auto-delete browser profile to free disk space
+  if (admin && admin.email) {
+    const path = require('path');
+    const fs = require('fs');
+    const safeEmail = admin.email.replace(/[^a-zA-Z0-9]/g, '_');
+    const BROWSER_DATA_DIR = process.env.BROWSER_DATA_PATH || path.join(__dirname, '..', 'browser_data');
+    const profileDir = path.join(BROWSER_DATA_DIR, `profile_${safeEmail}`);
+    try {
+      if (fs.existsSync(profileDir)) {
+        fs.rmSync(profileDir, { recursive: true, force: true });
+        console.log(`[Admin] Deleted browser profile: ${profileDir}`);
+      }
+    } catch (err) {
+      console.error(`[Admin] Failed to delete profile: ${err.message}`);
+    }
+  }
+
   res.json({ success: true });
 });
 
